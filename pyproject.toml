@@ -1,0 +1,48 @@
+[project]
+name = "pixtools"
+version = "0.1.0"
+description = "Hybrid-cloud distributed image processing pipeline"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "celery[redis]>=5.4.0",
+    "boto3>=1.35.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "redis>=5.2.0",
+    "httpx>=0.28.0",
+    "pillow>=11.0.0",
+    "pydantic-settings>=2.7.0",
+    "python-json-logger>=3.2.0",
+    "pybreaker>=1.2.0",
+    "alembic>=1.14.0",
+    "torch>=2.5.0",
+    "python-multipart>=0.0.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "ruff>=0.8.0",
+    "mypy>=1.14.0",
+    "types-redis>=4.6.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

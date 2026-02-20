@@ -1,18 +1,18 @@
 # PixTools — Sprint Breakdown
 
-## Sprint 1: Foundation & Local Dev Stack
+## Sprint 1: Foundation & Local Dev Stack *(IN PROGRESS)*
 > **Goal**: Project boots locally, DB connects, basic structure in place.
 
-- [ ] Scaffold project dirs (`app/`, `tests/`, `k8s/`, `infra/`, `models/`, `alembic/`)
-- [ ] `pyproject.toml` + `requirements.txt` (all deps pinned)
+- [x] Scaffold project dirs (`app/`, `tests/`, `k8s/`, `infra/`, `models/`, `alembic/`)
+- [x] `pyproject.toml` + `requirements.txt` (all deps pinned)
 - [ ] `app/config.py` — Pydantic Settings
 - [ ] `app/models.py` — SQLAlchemy `Job` model
 - [ ] `app/schemas.py` — Pydantic request/response models
 - [ ] `app/database.py` — async engine + session factory
 - [ ] `app/main.py` — FastAPI app factory with lifespan
-- [ ] `Dockerfile` — multi-stage build
-- [ ] `docker-compose.yaml` — FastAPI + Postgres + Redis + RabbitMQ + LocalStack
-- [ ] `.env.example`
+- [x] `Dockerfile` — multi-stage build
+- [x] `docker-compose.yaml` — FastAPI + Postgres + Redis + RabbitMQ + LocalStack
+- [x] `.env.example`
 - [ ] **Verify**: `docker-compose up` boots, `/docs` loads, DB connects
 
 ---
