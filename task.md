@@ -1,15 +1,15 @@
 # PixTools — Sprint Breakdown
 
-## Sprint 1: Foundation & Local Dev Stack *(IN PROGRESS)*
+## Sprint 1: Foundation & Local Dev Stack ✅
 > **Goal**: Project boots locally, DB connects, basic structure in place.
 
 - [x] Scaffold project dirs (`app/`, `tests/`, `k8s/`, `infra/`, `models/`, `alembic/`)
 - [x] `pyproject.toml` + `requirements.txt` (all deps pinned)
-- [ ] `app/config.py` — Pydantic Settings
-- [ ] `app/models.py` — SQLAlchemy `Job` model
-- [ ] `app/schemas.py` — Pydantic request/response models
-- [ ] `app/database.py` — async engine + session factory
-- [ ] `app/main.py` — FastAPI app factory with lifespan
+- [x] `app/config.py` — Pydantic Settings
+- [x] `app/models.py` — SQLAlchemy `Job` model
+- [x] `app/schemas.py` — Pydantic request/response models
+- [x] `app/database.py` — async engine + session factory
+- [x] `app/main.py` — FastAPI app factory with lifespan
 - [x] `Dockerfile` — multi-stage build
 - [x] `docker-compose.yaml` — FastAPI + Postgres + Redis + RabbitMQ + LocalStack
 - [x] `.env.example`
@@ -32,19 +32,29 @@
 
 ---
 
-## Sprint 3: DnCNN ML Integration
+## Sprint 3: Frontend (Neobrutalism)
+> **Goal**: Upload UI with preview, operation selection, result cards with download.
+
+- [ ] `app/static/index.html` — single-page layout (upload → processing → results)
+- [ ] `app/static/style.css` — neobrutalism design system
+- [ ] `app/static/app.js` — drag-drop, polling, result card rendering
+- [ ] Mount `StaticFiles` in `app/main.py`
+- [ ] **Verify**: Upload image via UI → see processing state → download results
+
+---
+
+## Sprint 4: DnCNN ML Integration
 > **Goal**: Denoise task runs real inference with `dncnn_color_blind.pth`.
 
 - [ ] `app/ml/dncnn.py` — DnCNN model definition (20-layer, 64ch, RGB)
 - [ ] `app/tasks/ml_ops.py` — denoise task with singleton model loading
 - [ ] Place `dncnn_color_blind.pth` in `models/`
 - [ ] ML worker queue isolation (`ml_inference_queue`, `--concurrency=1`)
-- [ ] `docker-compose.yaml` — add ML worker service
 - [ ] **Verify**: Upload noisy image with `["denoise"]` → denoised output in S3
 
 ---
 
-## Sprint 4: Production Hardening
+## Sprint 5: Production Hardening
 > **Goal**: Fault tolerance, observability, and code quality gates.
 
 - [ ] `app/logging_config.py` — structured JSON logging
@@ -59,7 +69,7 @@
 
 ---
 
-## Sprint 5: Infrastructure & Deployment
+## Sprint 6: Infrastructure & Deployment
 > **Goal**: Full K3s + AWS IaC, monitoring, CI pipeline.
 
 - [ ] `k8s/namespace.yaml`

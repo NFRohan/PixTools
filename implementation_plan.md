@@ -74,6 +74,10 @@ d:\Github\PixTools\
 │   ├── dependencies.py           # FastAPI dependency injection
 │   ├── logging_config.py         # Structured JSON logging + correlation IDs
 │   ├── middleware.py             # RequestID middleware
+│   ├── static/                   # Frontend (neobrutalism)
+│   │   ├── index.html
+│   │   ├── style.css
+│   │   └── app.js
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── jobs.py               # /process endpoint
@@ -243,6 +247,68 @@ Webhook delivery with **circuit breaker pattern** (using `pybreaker`):
 
 > [!TIP]
 > **Why This Matters (Interview)**: "If a client's webhook endpoint goes down, we don't want to burn Celery worker time retrying indefinitely. The circuit breaker trips after 5 failures, stops attempting for 60s, then cautiously retries. This isolates a single bad downstream from degrading the whole system."
+
+---
+
+### Frontend (`app/static/`) — Neobrutalism Design
+
+Served via FastAPI `StaticFiles` mount at `/`. Plain HTML + CSS + JS — no build step, no framework.
+
+**Design System:**
+- **Borders**: 3px solid black on all interactive elements
+- **Shadows**: `4px 4px 0px #000` solid offset (no blur)
+- **Typography**: `"Space Mono", monospace` for headings, `"Inter", sans-serif` for body
+- **Palette**: background `#FFFEF2` (warm white), accents — yellow `#FFE156`, cyan `#7DF9FF`, pink `#FF6B9D`, lime `#C1FF72`
+- **Buttons**: chunky, no border-radius, bold uppercase text, scale on hover
+
+#### [NEW] [index.html](file:///d:/Github/PixTools/app/static/index.html)
+Single-page layout with three states:
+
+**State 1 — Upload & Select:**
+```
+┌──────────────────────────────────────────────┐
+│  ██ PIXTOOLS                                 │
+│  ═══════════════════════════════              │
+│                                              │
+│  ┌─────────────────┐  ┌────────────────────┐ │
+│  │                 │  │ ☐ RESIZE           │ │
+│  │  DROP IMAGE     │  │ ☐ WEBP             │ │
+│  │  HERE           │  │ ☐ AVIF             │ │
+│  │  [preview]      │  │ ☐ DENOISE (AI)     │ │
+│  │                 │  │                    │ │
+│  └─────────────────┘  │  [ ■ PROCESS ]     │ │
+│                       └────────────────────┘ │
+└──────────────────────────────────────────────┘
+```
+
+**State 2 — Processing:**
+PROCESS button replaced by a thick-bordered progress indicator. Job ID shown. Polls `GET /jobs/{id}` every 2s.
+
+**State 3 — Results:**
+```
+┌──────────────────────────────────────────────┐
+│  RESULTS FOR JOB abc-123                     │
+│                                              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐     │
+│  │ RESIZE   │ │ WEBP     │ │ DENOISE  │     │
+│  │ [thumb]  │ │ [thumb]  │ │ [thumb]  │     │
+│  │[DOWNLOAD]│ │[DOWNLOAD]│ │[DOWNLOAD]│     │
+│  └──────────┘ └──────────┘ └──────────┘     │
+│                                              │
+│  [ ■ PROCESS ANOTHER ]                       │
+└──────────────────────────────────────────────┘
+```
+
+#### [NEW] [style.css](file:///d:/Github/PixTools/app/static/style.css)
+Full neobrutalism design system: custom properties, component styles (upload zone, operation pills, result cards, buttons), drag-over/hover animations, responsive grid.
+
+#### [NEW] [app.js](file:///d:/Github/PixTools/app/static/app.js)
+Vanilla JS handling:
+- Drag-and-drop + file input with instant preview (`FileReader` → `<img>` src)
+- Operation checkbox toggle
+- `POST /process` with `FormData` (file + operations JSON + idempotency key via `crypto.randomUUID()`)
+- Polling loop on `GET /jobs/{id}` (2s interval)
+- Dynamic result card rendering with presigned S3 download URLs
 
 ---
 
