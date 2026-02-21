@@ -26,6 +26,11 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ensured")
+
+    # Ensure S3 bucket and lifecycle policies are set up
+    from app.services.s3 import _get_client
+    _get_client()
+    logger.info("S3 bucket and lifecycle policies ensured")
     yield
     await engine.dispose()
     logger.info("Database engine disposed")

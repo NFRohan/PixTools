@@ -32,7 +32,42 @@ def _get_client():
         except Exception:
             _s3_client.create_bucket(Bucket=settings.aws_s3_bucket)
             logger.info("Created S3 bucket: %s", settings.aws_s3_bucket)
+        
+        _setup_lifecycle_policy(_s3_client)
     return _s3_client
+
+
+def _setup_lifecycle_policy(client):
+    """
+    Configure S3 Lifecycle rules to automatically expire/delete old objects.
+    This prevents storage bloat from temporary raw and processed images.
+    """
+    try:
+        client.put_bucket_lifecycle_configuration(
+            Bucket=settings.aws_s3_bucket,
+            LifecycleConfiguration={
+                "Rules": [
+                    {
+                        "ID": "ExpireRawImages",
+                        "Filter": {"Prefix": "raw/"},
+                        "Status": "Enabled",
+                        "Expiration": {"Days": settings.s3_retention_days},
+                    },
+                    {
+                        "ID": "ExpireProcessedImages",
+                        "Filter": {"Prefix": "processed/"},
+                        "Status": "Enabled",
+                        "Expiration": {"Days": settings.s3_retention_days},
+                    },
+                ]
+            },
+        )
+        logger.info(
+            "Configured S3 lifecycle policy (retention: %d days)",
+            settings.s3_retention_days,
+        )
+    except Exception as e:
+        logger.warning("Failed to configure S3 lifecycle policy: %s", e)
 
 
 def upload_raw(file_bytes: bytes, original_filename: str, job_id: uuid.UUID) -> str:

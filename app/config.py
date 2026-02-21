@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     # Data retention
     presigned_url_expiry_seconds: int = 86400  # 24 hours
     job_retention_hours: int = 24
+    s3_retention_days: int = 1
 
     # Notifications (optional)
     alert_email: str | None = None
