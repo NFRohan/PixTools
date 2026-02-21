@@ -73,3 +73,36 @@ celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 import app.tasks.image_ops  # noqa: F401
 import app.tasks.finalize  # noqa: F401
 import app.tasks.ml_ops  # noqa: F401
+
+# --- Logging & Correlation ID propagation ---
+from celery.signals import task_prerun, task_postrun, after_setup_logger, after_setup_task_logger
+from app.logging_config import setup_logging, request_id_ctx, job_id_ctx
+
+@after_setup_logger.connect
+@after_setup_task_logger.connect
+def setup_celery_logging(logger, **kwargs):
+    """Ensure all worker and task logs use our structured JSON logging."""
+    setup_logging()
+
+@task_prerun.connect
+def on_task_prerun(task_id, task, *args, **kwargs):
+    """
+    Pick up correlation IDs from task headers or kwargs
+    and set them in the ContextVar for the JSON logger.
+    """
+    # 1. Job ID: passed as a kwarg in all our tasks
+    job_id = kwargs.get("job_id", "N/A")
+    job_id_ctx.set(job_id)
+
+    # 2. Request ID: passed via headers['X-Request-ID'] or kwargs
+    # Search in headers (passed via apply_async)
+    request_stack = task.request_stack.top
+    headers = request_stack.headers if request_stack else {}
+    request_id = headers.get("X-Request-ID", kwargs.get("request_id", "N/A"))
+    request_id_ctx.set(request_id)
+
+@task_postrun.connect
+def on_task_postrun(task_id, task, *args, **kwargs):
+    """Reset context after task execution."""
+    request_id_ctx.set("N/A")
+    job_id_ctx.set("N/A")

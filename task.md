@@ -54,10 +54,14 @@
 
 ---
 
-## Sprint 5: Production Hardening
+## Sprint 5: Production Hardening ✅
 > **Goal**: Fault tolerance, observability, and code quality gates.
 
-- [ ] `app/logging_config.py` — structured JSON logging
+- [x] `app/logging_config.py` — structured JSON logging (`python-json-logger`)
+- [x] `app/services/webhook.py` — Implement **Circuit Breaker** (using `pybreaker`) for webhook deliveries
+- [x] Health check endpoint (`GET /api/health`) with DB/Redis/S3 reachability checks
+- [x] Celery `Task.on_failure` hooks for global error reporting
+- [x] **Verify**: Logs appear as JSON in console; webhooks trip "Open" status if target is down
 - [ ] `app/middleware.py` — RequestID middleware (correlation IDs)
 - [ ] `app/routers/health.py` — deep dependency health check
 - [ ] `app/services/webhook.py` — circuit breaker (pybreaker)

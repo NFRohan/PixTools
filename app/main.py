@@ -9,6 +9,10 @@ from fastapi.staticfiles import StaticFiles
 
 from app.database import engine
 from app.models import Base
+from app.logging_config import setup_logging, request_id_ctx
+
+# Initialize structured logging globally
+setup_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -36,21 +40,34 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # --- Middleware ---
+    from fastapi import Request
+    import uuid
+
+    @application.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        """Extracts or generates X-Request-ID for log correlation."""
+        rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        token = request_id_ctx.set(rid)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = rid
+            return response
+        finally:
+            request_id_ctx.reset(token)
+
     # --- Register routers ---
     from app.routers.jobs import router as jobs_router
+    from app.routers.health import router as health_router
 
     application.include_router(jobs_router, prefix="/api")
+    application.include_router(health_router, prefix="/api")
 
     # --- Mount static frontend ---
     if STATIC_DIR.exists():
         application.mount(
             "/static", StaticFiles(directory=str(STATIC_DIR)), name="static"
         )
-
-    # --- Health check (minimal, Sprint 5 adds deep checks) ---
-    @application.get("/health", tags=["ops"])
-    async def health():
-        return {"status": "ok"}
 
     # --- Root redirect to frontend ---
     from fastapi.responses import FileResponse

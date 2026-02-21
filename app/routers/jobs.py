@@ -109,7 +109,10 @@ async def create_job(
         idempotency.set_idempotency(idempotency_key, str(job_id))
 
     # --- Dispatch DAG ---
-    build_dag(str(job_id), s3_raw_key, [op.value for op in ops])
+    from app.logging_config import request_id_ctx
+    rid = request_id_ctx.get()
+    
+    build_dag(str(job_id), s3_raw_key, [op.value for op in ops], request_id=rid)
     logger.info("Job %s created and dispatched", job_id)
 
     return {"job_id": str(job_id), "status": "PENDING"}

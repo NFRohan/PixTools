@@ -60,7 +60,18 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
         if job:
             job.status = status
             job.result_urls = result_urls
+            webhook_url = job.webhook_url
             session.commit()
+
+    # --- Fire Webhook (Non-blocking sync-over-async wrapper) ---
+    if webhook_url:
+        import asyncio
+        from app.services.webhook import notify_job_update
+        try:
+            # Celery workers are synchronous, so we run the async webhook delivery using a new event loop
+            asyncio.run(notify_job_update(webhook_url, job_id, status.value, result_urls))
+        except Exception as e:
+            logger.error("Error initiating webhook delivery: %s", str(e))
 
     logger.info("Job %s: status → %s, %d result URLs", job_id, status.value, len(result_urls))
 

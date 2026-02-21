@@ -18,7 +18,7 @@ OPERATION_TASK_MAP = {
 }
 
 
-def build_dag(job_id: str, s3_raw_key: str, operations: list[str]) -> None:
+def build_dag(job_id: str, s3_raw_key: str, operations: list[str], request_id: str = "N/A") -> None:
     """Build and dispatch a Celery Canvas DAG for the given operations.
 
     Structure:
@@ -27,6 +27,9 @@ def build_dag(job_id: str, s3_raw_key: str, operations: list[str]) -> None:
     the finalize chord callback.
     """
     task_signatures = []
+    # Every task in the DAG inherits the X-Request-ID for correlation
+    headers = {"X-Request-ID": request_id}
+
     for op in operations:
         task_name = OPERATION_TASK_MAP.get(op)
         if task_name is None:
@@ -35,6 +38,7 @@ def build_dag(job_id: str, s3_raw_key: str, operations: list[str]) -> None:
         sig = celery_app.signature(
             task_name,
             kwargs={"job_id": job_id, "s3_raw_key": s3_raw_key},
+            headers=headers
         )
         task_signatures.append(sig)
 
@@ -45,6 +49,7 @@ def build_dag(job_id: str, s3_raw_key: str, operations: list[str]) -> None:
     finalize_sig = celery_app.signature(
         "app.tasks.finalize.finalize_job",
         kwargs={"job_id": job_id},
+        headers=headers
     )
 
     # chord: run all tasks in parallel, then call finalize with the results
