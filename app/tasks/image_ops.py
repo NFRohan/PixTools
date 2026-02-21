@@ -1,9 +1,9 @@
-"""Image format conversion tasks — JPG, PNG, WebP, AVIF."""
-
 import logging
 
 from app.services.s3 import download_raw, upload_processed
 from app.tasks.celery_app import celery_app
+
+import pillow_avif
 
 logger = logging.getLogger(__name__)
 

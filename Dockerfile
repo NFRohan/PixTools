@@ -7,6 +7,12 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
+RUN apt-get update && apt-get install -y \
+    libheif-dev \
+    libaom-dev \
+    pkg-config \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ---------- Stage 2: Runtime ----------
@@ -17,6 +23,11 @@ WORKDIR /app
 # Copy virtualenv from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+RUN apt-get update && apt-get install -y \
+    libheif1 \
+    libaom3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy application code
 COPY app/ ./app/

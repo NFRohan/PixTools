@@ -19,6 +19,7 @@ dependencies = [
     "alembic>=1.14.0",
     "torch>=2.5.0",
     "python-multipart>=0.0.18",
+    "pillow-avif-plugin>=1.4.6",
 ]
 
 [project.optional-dependencies]
