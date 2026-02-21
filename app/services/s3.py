@@ -89,8 +89,14 @@ def upload_processed(image: Image.Image, job_id: str, operation: str, fmt: str) 
 
 def generate_presigned_url(s3_key: str) -> str:
     """Generate a presigned download URL for a processed image."""
-    return _get_client().generate_presigned_url(
+    url = _get_client().generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.aws_s3_bucket, "Key": s3_key},
         ExpiresIn=settings.presigned_url_expiry_seconds,
     )
+    
+    # Patch for local dev: browser needs to route to localhost, not the Docker service name
+    if settings.aws_endpoint_url and "localstack" in settings.aws_endpoint_url:
+        url = url.replace("http://localstack:4566", "http://localhost:4566")
+        
+    return url
