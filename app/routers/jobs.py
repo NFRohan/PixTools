@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import verify_api_key
 from app.models import Job, JobStatus
 from app.schemas import OperationType
 from app.services import idempotency, s3
@@ -18,7 +17,7 @@ from app.services.dag_builder import build_dag
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["jobs"], dependencies=[Depends(verify_api_key)])
+router = APIRouter(tags=["jobs"])
 
 # Map file extension → MIME type for source format detection
 EXT_TO_FORMAT = {

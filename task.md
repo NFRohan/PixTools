@@ -32,14 +32,14 @@
 
 ---
 
-## Sprint 3: Frontend (Neobrutalism)
+## Sprint 3: Frontend (Neobrutalism) ✅
 > **Goal**: Upload UI with preview, operation selection, result cards with download.
 
-- [ ] `app/static/index.html` — single-page layout (upload → processing → results)
-- [ ] `app/static/style.css` — neobrutalism design system
-- [ ] `app/static/app.js` — drag-drop, polling, result card rendering
-- [ ] Mount `StaticFiles` in `app/main.py`
-- [ ] **Verify**: Upload image via UI → see processing state → download results
+- [x] `app/static/index.html` — single-page layout (upload → processing → results)
+- [x] `app/static/style.css` — neobrutalism design system
+- [x] `app/static/app.js` — drag-drop, polling, result card rendering
+- [x] Mount `StaticFiles` in `app/main.py`
+- [x] **Verify**: Upload image via UI → see processing state → download results
 
 ---
 

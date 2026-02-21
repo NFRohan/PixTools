@@ -66,7 +66,7 @@ graph LR
 | Accepted input formats | `image/jpeg`, `image/png`, `image/webp`, `image/avif` |
 | Supported operations | `jpg`, `png`, `webp`, `avif` (format conversion), `denoise` (DnCNN) |
 | Same-format rejection | If source format == target format, reject the operation (validated in frontend + backend) |
-| Auth | `X-API-Key` header — single shared key (checked via FastAPI `Depends`) |
+| Auth | `X-API-Key` header — available as dependency, **not enforced** on demo routes (frontend is same-origin) |
 | Webhook | Internal to frontend only — no direct API access for end users |
 | HTTP status codes | Standard codes (`200`, `202`, `400`, `401`, `404`, `413`, `422`, `500`) |
 
@@ -339,19 +339,28 @@ Polling state machine:
 | `FAILED` | Show error card with `error_message` from response |
 
 **State 3 — Results:**
+Result cards show image **previews** (presigned URL → `<img>` tag) plus download buttons. Each card gets a different accent color.
+
+"Process Another" moves current results to a **Previous Jobs** section (persisted on page) and resets the upload form. Previous job download links remain available until the user refreshes.
+
 ```
 ┌──────────────────────────────────────────────┐
 │  RESULTS FOR JOB abc-123                     │
 │                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐     │
 │  │ WEBP     │ │ AVIF     │ │ DENOISE  │     │
-│  │ [thumb]  │ │ [thumb]  │ │ [thumb]  │     │
+│  │ [prevw]  │ │ [prevw]  │ │ [prevw]  │     │
 │  │[DOWNLOAD]│ │[DOWNLOAD]│ │[DOWNLOAD]│     │
 │  └──────────┘ └──────────┘ └──────────┘     │
 │                                              │
 │  [ ■ PROCESS ANOTHER ]                       │
+│                                              │
+│  ── PREVIOUS JOBS ────────────────────────  │
+│  job xyz-789: WEBP • JPG   [links]           │
 └──────────────────────────────────────────────┘
 ```
+
+**Error display**: Inline errors shown near the upload zone or operation pills (e.g., "File exceeds 10MB", "Cannot convert PNG to PNG"). No toast notifications.
 
 #### [NEW] [style.css](file:///d:/Github/PixTools/app/static/style.css)
 Full neobrutalism design system: custom properties, component styles (upload zone, operation pills, result cards, buttons), drag-over/hover animations, responsive grid.
@@ -360,10 +369,11 @@ Full neobrutalism design system: custom properties, component styles (upload zon
 Vanilla JS handling:
 - Drag-and-drop + file input with instant preview (`FileReader` → `<img>` src)
 - Operation checkbox toggle (disables same-format-as-source options)
-- File validation: check MIME type + size before upload
-- `POST /process` with `FormData` (file + operations JSON + idempotency key via `crypto.randomUUID()`)
-- Polling loop on `GET /jobs/{id}` (2s interval) — treats both `COMPLETED` and `COMPLETED_WEBHOOK_FAILED` as success (show download links)
-- Dynamic result card rendering with presigned S3 download URLs
+- **Inline** error display: MIME type, size, same-format validation shown near the relevant element
+- `POST /api/process` with `FormData` (file + operations JSON + idempotency key via `crypto.randomUUID()`)
+- Polling loop on `GET /api/jobs/{id}` (2s interval) — treats both `COMPLETED` and `COMPLETED_WEBHOOK_FAILED` as success
+- Result cards with **image previews** (presigned URL → `<img>`) + download buttons
+- **Previous Jobs** section — "Process Another" moves current results down, keeps download links alive
 
 ---
 

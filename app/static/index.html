@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PixTools</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" type="image/x-icon" href="data:image/x-icon;,">
+</head>
+<body>
+    <main class="container">
+        <!-- Header -->
+        <header class="header card-neo bg-white">
+            <h1 class="logo-text">■ PIXTOOLS</h1>
+            <p class="tagline">Hybrid-cloud image processing pipeline</p>
+        </header>
+
+        <!-- Main Workspace Area -->
+        <div id="workspace" class="workspace-grid">
+            
+            <!-- Column 1: Upload Zone -->
+            <div class="col-upload">
+                <div id="drop-zone" class="card-neo bg-yellow upload-area">
+                    <input type="file" id="file-input" accept="image/jpeg, image/png, image/webp, image/avif" hidden>
+                    <div id="upload-prompt">
+                        <span class="icon-large">📥</span>
+                        <h2>DROP IMAGE HERE</h2>
+                        <p>or click to browse<br><small>(JPG, PNG, WEBP, AVIF max 10MB)</small></p>
+                    </div>
+                    <img id="image-preview" class="preview-img hidden" src="" alt="Preview">
+                    <button id="btn-remove-preview" class="btn-circular hidden" title="Remove image">✕</button>
+                    <!-- Inline error container -->
+                    <div id="upload-error" class="error-toast hidden"></div>
+                </div>
+            </div>
+
+            <!-- Column 2: Operations & Controls -->
+            <div class="col-controls">
+                <div class="card-neo bg-white controls-panel">
+                    <h3>OPERATIONS</h3>
+                    <div class="ops-grid">
+                        <label class="op-checkbox default-op">
+                            <input type="checkbox" name="operation" value="jpg">
+                            <span class="op-box"></span>
+                            <span class="op-label">JPG</span>
+                        </label>
+                        <label class="op-checkbox default-op">
+                            <input type="checkbox" name="operation" value="png">
+                            <span class="op-box"></span>
+                            <span class="op-label">PNG</span>
+                        </label>
+                        <label class="op-checkbox default-op">
+                            <input type="checkbox" name="operation" value="webp">
+                            <span class="op-box"></span>
+                            <span class="op-label">WEBP</span>
+                        </label>
+                        <label class="op-checkbox default-op">
+                            <input type="checkbox" name="operation" value="avif">
+                            <span class="op-box"></span>
+                            <span class="op-label">AVIF</span>
+                        </label>
+                        <label class="op-checkbox ai-op">
+                            <input type="checkbox" name="operation" value="denoise">
+                            <span class="op-box"></span>
+                            <span class="op-label">DENOISE (AI)</span>
+                        </label>
+                    </div>
+                    <!-- Inline error container -->
+                    <div id="ops-error" class="error-toast hidden"></div>
+                </div>
+
+                <!-- Process Button States -->
+                <button id="btn-process" class="btn-neo btn-primary" disabled>
+                    PROCESS <span>►</span>
+                </button>
+                
+                <div id="process-indicator" class="card-neo bg-cyan hidden processing-box">
+                    <div class="spinner"></div>
+                    <div class="processing-text">
+                        <h3>PROCESSING</h3>
+                        <p id="job-id-display" class="mono-text small-text">job-id-here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current Results Area (Hidden initially) -->
+        <section id="results-section" class="results-area hidden">
+            <div class="results-header card-neo bg-white">
+                <h2>RESULTS</h2>
+                <button id="btn-process-another" class="btn-neo btn-secondary btn-small">PROCESS ANOTHER ↺</button>
+            </div>
+            <!-- Sub-error banner if webhook failed but polling succeeded -->
+            <div id="webhook-warning" class="error-toast hidden bg-yellow">
+                ⚠ Webhook delivery failed, but results are available below.
+            </div>
+            <div id="result-cards-container" class="results-grid">
+                <!-- Cards injected here via JS -->
+            </div>
+        </section>
+
+        <!-- Previous Jobs Area (Hidden initially) -->
+        <section id="history-section" class="history-area hidden mt-loose">
+            <h3 class="history-title">── PREVIOUS JOBS ────────────────────────</h3>
+            <div id="history-container" class="history-list">
+                <!-- History items injected here via JS -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Template for Result Card -->
+    <template id="tpl-result-card">
+        <div class="card-neo result-card">
+            <div class="card-header">
+                <h3 class="op-name">TYPE</h3>
+            </div>
+            <div class="img-preview-container">
+                <img class="result-img" src="" alt="Result" loading="lazy">
+            </div>
+            <a href="#" class="btn-neo btn-download" download>DOWNLOAD ↓</a>
+        </div>
+    </template>
+
+    <!-- Template for History Item -->
+    <template id="tpl-history-item">
+        <div class="card-neo bg-white history-item">
+            <div class="history-meta">
+                <span class="history-id mono-text">id</span>
+                <span class="history-ops">ops</span>
+            </div>
+            <div class="history-links">
+                <!-- Download links injected here -->
+            </div>
+        </div>
+    </template>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
