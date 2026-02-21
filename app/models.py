@@ -40,6 +40,7 @@ class Job(Base):
     result_urls: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     webhook_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     s3_raw_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(

@@ -87,11 +87,15 @@ def upload_processed(image: Image.Image, job_id: str, operation: str, fmt: str) 
     return key
 
 
-def generate_presigned_url(s3_key: str) -> str:
+def generate_presigned_url(s3_key: str, download_filename: str = None) -> str:
     """Generate a presigned download URL for a processed image."""
+    params = {"Bucket": settings.aws_s3_bucket, "Key": s3_key}
+    if download_filename:
+        params["ResponseContentDisposition"] = f'attachment; filename="{download_filename}"'
+
     url = _get_client().generate_presigned_url(
         "get_object",
-        Params={"Bucket": settings.aws_s3_bucket, "Key": s3_key},
+        Params=params,
         ExpiresIn=settings.presigned_url_expiry_seconds,
     )
     

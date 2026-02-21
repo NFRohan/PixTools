@@ -34,26 +34,34 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
     """
     logger.info("Job %s: finalizing with %d results", job_id, len(results))
 
-    # Generate presigned download URLs
-    result_urls = {}
-    for s3_key in results:
-        if not s3_key:
-            continue
-        # Extract operation name from key: processed/{job_id}/{op}_{hash}.ext
-        parts = s3_key.split("/")[-1]  # e.g., "webp_abc123.webp"
-        op_name = parts.split("_")[0]  # e.g., "webp"
-        result_urls[op_name] = generate_presigned_url(s3_key)
-
-    # Update job in DB
     status = JobStatus.COMPLETED
     engine = _get_sync_engine()
+    result_urls = {}
+
     with Session(engine) as session:
-        session.execute(
-            update(Job)
-            .where(Job.id == job_id)
-            .values(status=status, result_urls=result_urls)
-        )
-        session.commit()
+        # Fetch the job to get the original filename
+        job = session.get(Job, job_id)
+        orig_name = "image"
+        if job and job.original_filename:
+            orig_name = job.original_filename.rsplit(".", 1)[0]
+
+        # Generate presigned download URLs with correct disposition filename
+        for s3_key in results:
+            if not s3_key:
+                continue
+            parts = s3_key.split("/")[-1]  # e.g., "webp_abc123.webp"
+            op_name = parts.split("_")[0]  # e.g., "webp"
+            ext = parts.split(".")[-1]
+
+            dl_name = f"pixtools_{op_name}_{orig_name}.{ext}"
+            result_urls[op_name] = generate_presigned_url(s3_key, download_filename=dl_name)
+
+        # Update job
+        if job:
+            job.status = status
+            job.result_urls = result_urls
+            session.commit()
+
     logger.info("Job %s: status → %s, %d result URLs", job_id, status.value, len(result_urls))
 
     return {"job_id": job_id, "status": status.value, "result_urls": result_urls}

@@ -98,6 +98,7 @@ async def create_job(
         status=JobStatus.PENDING,
         operations=[op.value for op in ops],
         s3_raw_key=s3_raw_key,
+        original_filename=file.filename,
         webhook_url="internal://frontend",  # webhook is internal to frontend
     )
     db.add(job)
