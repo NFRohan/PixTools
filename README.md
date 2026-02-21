@@ -1,69 +1,85 @@
 # PixTools 🎨
 
-PixTools is a high-performance, distributed, hybrid-cloud image processing pipeline. Built for scalability and resilience, it allows users to upload images and chain multiple transformations (like format conversion and AI-powered denoising) via an asynchronous Directed Acyclic Graph (DAG) execution model.
+PixTools is a production-hardened, distributed image processing orchestrator. Built for high-volume transformation pipelines, it combines the speed of **FastAPI** with the massive parallelism of **Celery** to deliver a seamless, asynchronous image manipulation suite.
 
-Currently serving an intuitive Neobrutalist UI, the backend is orchestrated via FastAPI and Celery.
+---
 
-## 🌟 Key Features
+## 🚀 Specialized Capabilities
 
-*   **Asynchronous Processing Pipeline**: Leverages Celery chords and chains to distribute image transformations across isolated worker queues (Standard IO vs. Heavy ML compute).
-*   **AI Denoising (DnCNN)**: Integrates an active PyTorch inference worker utilizing a pretrained DnCNN model to algorithmically clean noisy images.
-*   **Resilience & Fault Tolerance**:
-    *   **Circuit Breaker**: Outbound webhooks are protected by `pybreaker`, preventing cascading failures when external notification sinks are offline.
-    *   **Dead Letter Queue (DLQ)**: Poisonous RabbitMQ payloads are safely quarantined to a `dlx` exchange rather than dropped or infinitely retried.
-    *   **Idempotency Checks**: A `redis`-backed 24-hour cache layer ignores repeat HTTP requests for the same computational job payload, saving DB IO and cloud compute.
-*   **Portability First**: All blob storage interactions are abstracted behind an S3 wrapper, completely functional offline via `moto` testing and `localstack`.
+### ⚡ Distributed Execution Model
+Uses an asynchronous **Directed Acyclic Graph (DAG)** model to chain transformations. Complex multi-format conversions (WEBP, AVIF, PNG) and AI inference jobs are distributed across specific worker queues (Standard IO vs. Heavy ML compute).
 
-## 🏗 Architecture & Stack
+### 🧠 Deep Learning Denoising
+Integrates a dedicated ML worker-pool utilizing a **PyTorch-based DnCNN model**. This provides algorithmic noise reduction for low-light or high-ISO captures, isolated on a dedicated queue with concurrency controls for optimal GPU/CPU utilization.
 
-*   **API Layer**: FastAPI (Async ecosystem)
-*   **Database**: PostgreSQL via SQLAlchemy Async Engine (`asyncpg`) & Alembic Migrations
-*   **Broker**: RabbitMQ
-*   **Cache / State Backend**: Redis (Used for Idempotency and Celery Chords)
-*   **Storage**: Amazon S3 (Simulated locally via LocalStack)
-*   **Workers**: Celery (Sync wrappers with solo pools for ML)
-*   **Testing**: Pytest (100% green with 87% coverage), Ruff (Formatting), MyPy (Strict Typings)
+### 💾 Automated Storage Optimization
+Implements **S3 Lifecycle Engines** to prevent cloud storage bloat.
+- **Auto-Cleanup**: Temporary raw and processed artifacts are automatically expired after **24 hours**.
+- **Self-Healing Policies**: Storage buckets and lifecycle rules are enforced automatically upon application startup.
 
-## 🐳 Local Development Setup
+### 🕵️ Anonymous Persistence & History
+Track your work without the friction of account creation.
+- **Client-Side Memory**: Leverages `localStorage` to persist your job history across browser sessions.
+- **Dynamic Link Healing**: The API dynamically regenerates S3 presigned URLs on every request, ensuring links work for the full duration of their retention window.
+- **Expiration Awareness**: Visual badges flag jobs passed their 24h retention window, preventing broken link frustration.
 
-The easiest way to boot the ecosystem is via Docker Compose, which spins up the API, Celery Workers, Postgres, Redis, RabbitMQ, and LocalStack.
+### 🛡️ Resilience Architecture
+*   **Circuit Breakers**: Outbound webhooks (webhook-sink-agnostic) are protected by `pybreaker` logic.
+*   **Dead Letter Queues (DLQ)**: Poisonous RabbitMQ payloads are quarantined to a `dlx` exchange for forensics.
+*   **Atomic Idempotency**: A Redis-backed 24-hour cache layer enforces strict job idempotency.
 
-### 1. Boot the Infrastructure
+---
+
+## 🏗 Technology Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **Backend** | Python 3.12 (FastAPI, Celery, SQLAlchemy) |
+| **Inference** | PyTorch (Pre-trained DnCNN) |
+| **UI** | Vanilla JS (Neobrutalist Styling) |
+| **Storage** | Amazon S3 / LocalStack |
+| **DB / Cache** | PostgreSQL, Redis, RabbitMQ |
+| **DevOps** | Docker, Alembic, Ruff, MyPy |
+
+---
+
+## 🐳 Getting Started
+
+### 1. Boot the Ecosystem
+Spin up the orchestration plane and workers:
 ```bash
 docker compose up -d
 ```
-*   **Frontend / API**: `http://localhost:8000`
-*   **API Docs**: `http://localhost:8000/docs`
-*   **RabbitMQ UI**: `http://localhost:15672` (guest/guest)
 
-### 2. Apply Database Migrations
-Initialize the Postgres schemas via Alembic:
+### 2. Synchronize Schemas
+Ensure the database and persistence layers are in their latest revision:
 ```bash
-alembic upgrade head
+docker compose exec api alembic upgrade head
 ```
 
-## 🧪 Testing and QA
+### 3. Access the Tools
+- **Main App**: [http://localhost:8000](http://localhost:8000)
+- **Interactive API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-The project contains a comprehensive test suite covering the async API boundaries, synchronous Celery tasks, S3 interactions, and webhook resilience layers. 
+---
 
-### Running Tests
-To run the automated suite with coverage:
+## 🧪 Testing & Quality Assurance
+
+PixTools maintains a rigorous testing protocol with **87%+ code coverage**.
+
+### Automated Suite
 ```bash
-python -m pip install -e .[dev]
+# Run the full integration suite
 pytest -v --cov=app tests/
 ```
 
 ### Static Analysis
-Ensure code quality before committing:
 ```bash
 ruff check app tests
 mypy app
 ```
 
-## 🚀 Usage Guide
+---
 
-1.  Navigate to `http://localhost:8000` to access the Neobrutalist Web UI.
-2.  Drag and drop an image file.
-3.  Select desired conversions (e.g., `WEBP`, `AVIF`, or `DENOISE`).
-4.  Submit the job. The UI will instantly poll for the job status.
-5.  Watch real-time asynchronous background processing generate the output artifacts and presigned S3 download URLs.
+## 🛡 License
+Internal Project - All Rights Reserved.
