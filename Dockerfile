@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y \
 COPY app/ ./app/
 COPY models/ ./models/
 COPY alembic/ ./alembic/
+COPY alembic.ini .
 
 # Default: run FastAPI via Uvicorn
 # Override CMD for Celery workers in docker-compose / K8s

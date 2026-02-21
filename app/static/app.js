@@ -34,6 +34,10 @@ const tplResultCard = document.getElementById('tpl-result-card');
 const tplHistoryItem = document.getElementById('tpl-history-item');
 
 // --- State ---
+const STORAGE_KEY = 'pixtools_jobs';
+const HISTORY_LIMIT = 10;
+const RETENTION_HOURS = 24;
+
 let currentFile = null;
 let currentExt = null;
 let currentFormat = null;
@@ -46,6 +50,14 @@ const EXT_TO_FORMAT = {
     'jpg': 'jpg', 'jpeg': 'jpg', 'png': 'png',
     'webp': 'webp', 'avif': 'avif'
 };
+
+// --- Initialization ---
+
+function init() {
+    loadHistoryFromStorage();
+}
+
+document.addEventListener('DOMContentLoaded', init);
 
 // --- Drag & Drop / File Selection ---
 
@@ -200,6 +212,9 @@ btnProcess.addEventListener('click', async () => {
         const jobId = data.job_id;
         jobIdDisplay.textContent = `Job: ${jobId.split('-')[0]}...`;
 
+        // Persist Job ID
+        saveJobToStorage(jobId);
+
         // Start polling
         startPolling(jobId);
 
@@ -236,8 +251,6 @@ function startPolling(jobId) {
 
         } catch (err) {
             console.error("Polling error:", err);
-            // Don't kill polling on a transient network error, just log it.
-            // But if it's persistent, could add a retry counter here.
         }
     }, 2000);
 }
@@ -245,20 +258,15 @@ function startPolling(jobId) {
 // --- Results Rendering ---
 
 function renderResults(jobData) {
-    // Hide process indicator
     processIndicator.classList.add('hidden');
-
-    // Clear old cards
     resultCardsContainer.innerHTML = '';
 
-    // Show warning if webhook failed
     if (jobData.status === 'COMPLETED_WEBHOOK_FAILED') {
         webhookWarning.classList.remove('hidden');
     } else {
         webhookWarning.classList.add('hidden');
     }
 
-    // Render cards
     const urls = jobData.result_urls || {};
     for (const [op, url] of Object.entries(urls)) {
         const clone = tplResultCard.content.cloneNode(true);
@@ -266,61 +274,44 @@ function renderResults(jobData) {
 
         clone.querySelector('.op-name').textContent = op.toUpperCase();
 
-        // Thumbnail handling
         const img = clone.querySelector('.result-img');
-        if (op === 'avif') {
-            // AVIF support is spotty in browser <img> tags, provide fallback text
-            // For now, we attempt to load it, but the alt text is the fallback
-            img.src = url;
-            img.onerror = () => {
-                img.style.display = 'none';
-                img.parentElement.innerHTML = '<div style="padding:1rem;font-weight:bold;text-align:center;">IMG 📥</div>';
-            };
-        } else {
-            img.src = url;
-        }
+        img.src = url;
+        img.onerror = () => {
+            img.style.display = 'none';
+            img.parentElement.innerHTML = '<div style="padding:1rem;font-weight:bold;text-align:center;">IMG 📥</div>';
+        };
 
-        // Specific styling class based on op
         card.classList.add(`op-${op}`);
 
-        // Download button config
         const btn = clone.querySelector('.btn-download');
         btn.href = url;
-        // The presigned URL handles the actual download, but we set a nice filename attribute
-        const ext = op === 'denoise' ? currentExt : op;
+        const ext = op === 'denoise' ? 'result' : op;
         btn.download = `pixtools_${op}_${jobData.job_id.split('-')[0]}.${ext}`;
 
         resultCardsContainer.appendChild(clone);
     }
 
-    // Show results section
     resultsSection.classList.remove('hidden');
-
-    // Scroll to results
     resultsSection.scrollIntoView({ behavior: 'smooth' });
 }
 
 // --- Process Another / History ---
 
 btnProcessAnother.addEventListener('click', () => {
-    // Move current results to history
     if (currentJobData) {
         moveToHistory(currentJobData);
         currentJobData = null;
     }
 
-    // Reset UI
     resultsSection.classList.add('hidden');
     restoreProcessButton();
     resetUploadState();
-
-    // Unfreeze upload area
     dropZone.style.pointerEvents = 'auto';
-
     window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
 function moveToHistory(jobData) {
+    const isExpired = checkExpiry(jobData.created_at);
     historySection.classList.remove('hidden');
 
     const clone = tplHistoryItem.content.cloneNode(true);
@@ -330,22 +321,76 @@ function moveToHistory(jobData) {
     clone.querySelector('.history-ops').textContent = jobData.operations.join(' • ').toUpperCase();
 
     const linksContainer = clone.querySelector('.history-links');
-    const urls = jobData.result_urls || {};
 
-    for (const [op, url] of Object.entries(urls)) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.className = 'history-link';
-        a.textContent = op.toUpperCase();
-
-        const ext = op === 'denoise' ? currentExt : op;
-        a.download = `pixtools_${op}_${shortId}.${ext}`;
-
-        linksContainer.appendChild(a);
+    if (isExpired) {
+        const span = document.createElement('span');
+        span.className = 'badge-expired';
+        span.textContent = 'EXPIRED';
+        span.title = 'Files were cleaned up after 24h retention period';
+        linksContainer.appendChild(span);
+    } else {
+        const urls = jobData.result_urls || {};
+        for (const [op, url] of Object.entries(urls)) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.className = 'history-link';
+            a.textContent = op.toUpperCase();
+            const ext = op === 'denoise' ? 'result' : op;
+            a.download = `pixtools_${op}_${shortId}.${ext}`;
+            linksContainer.appendChild(a);
+        }
     }
 
-    // Prepend to top
     historyContainer.prepend(clone);
+}
+
+// --- Persistence Helpers ---
+
+function saveJobToStorage(jobId) {
+    let jobs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    // Avoid duplicates
+    if (!jobs.includes(jobId)) {
+        jobs.push(jobId);
+        // Limit history size
+        if (jobs.length > HISTORY_LIMIT) jobs.shift();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
+    }
+}
+
+async function loadHistoryFromStorage() {
+    const jobs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    if (jobs.length === 0) return;
+
+    // Fetch details for each job
+    // We do this sequentially to avoid overwhelming the server, or use Promise.all
+    const jobDataPromises = jobs.map(id => fetch(`/api/jobs/${id}`).then(r => r.ok ? r.json() : null));
+    const allJobs = await Promise.all(jobDataPromises);
+
+    allJobs.forEach(data => {
+        if (!data) return;
+        if (data.status === 'COMPLETED' || data.status === 'COMPLETED_WEBHOOK_FAILED' || data.status === 'FAILED') {
+            moveToHistory(data);
+        } else {
+            // If it's still processing, resume polling in its own silo
+            // (Note: this simple implementation only supports one active poll in UI indicator,
+            // but we can start background polling here if we wanted to heal)
+            startPolling(data.job_id);
+            // Show processing state if it matches most recent
+            if (data.job_id === jobs[jobs.length - 1]) {
+                btnProcess.classList.add('hidden');
+                processIndicator.classList.remove('hidden');
+                jobIdDisplay.textContent = `Resuming: ${data.job_id.split('-')[0]}...`;
+            }
+        }
+    });
+}
+
+function checkExpiry(isoString) {
+    if (!isoString) return false;
+    const created = new Date(isoString);
+    const now = new Date();
+    const diffHours = (now - created) / (1000 * 60 * 60);
+    return diffHours >= RETENTION_HOURS;
 }
 
 // --- Helpers ---
@@ -353,7 +398,7 @@ function moveToHistory(jobData) {
 function restoreProcessButton() {
     processIndicator.classList.add('hidden');
     btnProcess.classList.remove('hidden');
-    updateOpsAvailability(); // re-checks disabled states based on current file
+    updateOpsAvailability();
     if (currentFile) {
         checkboxes.forEach(cb => {
             if (!cb.closest('.op-checkbox').classList.contains('disabled')) {

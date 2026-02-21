@@ -130,11 +130,26 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
             detail=f"Job {job_id} not found",
         )
 
+    # If result_urls are missing or expired (stored signed URLs have a TTL), 
+    # we regenerate them on the fly if we have result_keys.
+    # This ensures history links work as long as the file exists in S3.
+    result_urls = job.result_urls or {}
+    if job.status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WEBHOOK_FAILED] and job.result_keys:
+        fresh_urls = {}
+        original_base = job.original_filename.rsplit(".", 1)[0] if job.original_filename else "image"
+        
+        for op, s3_key in job.result_keys.items():
+            ext = s3_key.split(".")[-1]
+            dl_name = f"pixtools_{op}_{original_base}.{ext}"
+            fresh_urls[op] = s3.generate_presigned_url(s3_key, download_filename=dl_name)
+        
+        result_urls = fresh_urls
+
     return {
         "job_id": str(job.id),
         "status": job.status.value,
         "operations": job.operations,
-        "result_urls": job.result_urls or {},
+        "result_urls": result_urls,
         "error_message": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
     }

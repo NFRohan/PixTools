@@ -47,6 +47,7 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
             orig_name = job.original_filename.rsplit(".", 1)[0]
 
         # Generate presigned download URLs with correct disposition filename
+        result_keys = {}
         for s3_key in results:
             if not s3_key:
                 continue
@@ -56,11 +57,13 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
 
             dl_name = f"pixtools_{op_name}_{orig_name}.{ext}"
             result_urls[op_name] = generate_presigned_url(s3_key, download_filename=dl_name)
+            result_keys[op_name] = s3_key
 
         # Update job
         if job:
             job.status = status
             job.result_urls = result_urls
+            job.result_keys = result_keys
             webhook_url = job.webhook_url
             session.commit()
 
