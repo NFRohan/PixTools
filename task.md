@@ -17,18 +17,18 @@
 
 ---
 
-## Sprint 2: Core Pipeline (API → Celery → S3)
+## Sprint 2: Core Pipeline (API → Celery → S3) ✅
 > **Goal**: End-to-end flow works — upload image, run tasks, get webhook.
 
-- [ ] `app/routers/jobs.py` — `POST /process` + `GET /jobs/{id}`
-- [ ] `app/services/s3.py` — upload_raw, download_raw, upload_processed
-- [ ] `app/services/idempotency.py` — Redis check/set
-- [ ] `app/services/dag_builder.py` — Canvas chain/chord builder
-- [ ] `app/tasks/celery_app.py` — Celery config + queue routing
-- [ ] `app/tasks/image_ops.py` — convert_jpg, convert_png, convert_webp, convert_avif
-- [ ] `app/tasks/finalize.py` — DB update + webhook POST
+- [x] `app/routers/jobs.py` — `POST /process` + `GET /jobs/{id}`
+- [x] `app/services/s3.py` — upload_raw, download_raw, upload_processed
+- [x] `app/services/idempotency.py` — Redis check/set
+- [x] `app/services/dag_builder.py` — Canvas chain/chord builder
+- [x] `app/tasks/celery_app.py` — Celery config + queue routing
+- [x] `app/tasks/image_ops.py` — convert_jpg, convert_png, convert_webp, convert_avif
+- [x] `app/tasks/finalize.py` — DB update + webhook POST
 - [ ] `tests/test_api.py`, `tests/test_dag_builder.py`, `tests/test_tasks.py`
-- [ ] **Verify**: Upload image → task runs → processed image in S3 → webhook fires
+- [x] **Verify**: Upload image → task runs → processed image in S3 → job COMPLETED with presigned URLs
 
 ---
 

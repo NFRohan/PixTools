@@ -65,5 +65,8 @@ celery_app.conf.task_time_limit = 60  # hard kill after 60s
 celery_app.conf.task_soft_time_limit = 55  # raise SoftTimeLimitExceeded at 55s
 celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 
-# --- Auto-discover tasks from these modules ---
-celery_app.autodiscover_tasks(["app.tasks"])
+# --- Import task modules so they register with the app ---
+import app.tasks.image_ops  # noqa: F401
+import app.tasks.finalize  # noqa: F401
+
+# ml_ops imported in Sprint 4 when ready

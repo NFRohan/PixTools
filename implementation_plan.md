@@ -330,6 +330,14 @@ Single-page layout with three states:
 **State 2 — Processing:**
 PROCESS button replaced by a thick-bordered progress indicator. Job ID shown. Polls `GET /jobs/{id}` every 2s.
 
+Polling state machine:
+| `status` from API | Frontend action |
+|---|---|
+| `PENDING` / `PROCESSING` | Keep polling |
+| `COMPLETED` | → State 3 (show results) |
+| `COMPLETED_WEBHOOK_FAILED` | → State 3 (show results + subtle warning: "webhook delivery failed") |
+| `FAILED` | Show error card with `error_message` from response |
+
 **State 3 — Results:**
 ```
 ┌──────────────────────────────────────────────┐
@@ -351,9 +359,10 @@ Full neobrutalism design system: custom properties, component styles (upload zon
 #### [NEW] [app.js](file:///d:/Github/PixTools/app/static/app.js)
 Vanilla JS handling:
 - Drag-and-drop + file input with instant preview (`FileReader` → `<img>` src)
-- Operation checkbox toggle
+- Operation checkbox toggle (disables same-format-as-source options)
+- File validation: check MIME type + size before upload
 - `POST /process` with `FormData` (file + operations JSON + idempotency key via `crypto.randomUUID()`)
-- Polling loop on `GET /jobs/{id}` (2s interval)
+- Polling loop on `GET /jobs/{id}` (2s interval) — treats both `COMPLETED` and `COMPLETED_WEBHOOK_FAILED` as success (show download links)
 - Dynamic result card rendering with presigned S3 download URLs
 
 ---

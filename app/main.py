@@ -36,6 +36,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # --- Register routers ---
+    from app.routers.jobs import router as jobs_router
+
+    application.include_router(jobs_router, prefix="/api")
+
     # --- Mount static frontend ---
     if STATIC_DIR.exists():
         application.mount(
