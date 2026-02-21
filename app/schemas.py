@@ -10,7 +10,8 @@ from pydantic import BaseModel, HttpUrl
 class OperationType(str, Enum):
     """Supported image operations."""
 
-    RESIZE = "resize"
+    JPG = "jpg"
+    PNG = "png"
     WEBP = "webp"
     AVIF = "avif"
     DENOISE = "denoise"

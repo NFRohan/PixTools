@@ -56,6 +56,51 @@ graph LR
 
 ---
 
+## System Specifications
+
+### API Contract
+
+| Spec | Value |
+|---|---|
+| Max upload size | **10 MB** |
+| Accepted input formats | `image/jpeg`, `image/png`, `image/webp`, `image/avif` |
+| Supported operations | `jpg`, `png`, `webp`, `avif` (format conversion), `denoise` (DnCNN) |
+| Same-format rejection | If source format == target format, reject the operation (validated in frontend + backend) |
+| Auth | `X-API-Key` header — single shared key (checked via FastAPI `Depends`) |
+| Webhook | Internal to frontend only — no direct API access for end users |
+| HTTP status codes | Standard codes (`200`, `202`, `400`, `401`, `404`, `413`, `422`, `500`) |
+
+### Error Handling
+
+| Spec | Value |
+|---|---|
+| Max retries per task | **3** (then routes to DLQ) |
+| Invalid file upload | Return `400` with error message, display in frontend |
+| Same-format conversion | Rejected pre-submission (frontend filter) + `422` from backend |
+
+### Data Retention
+
+| Spec | Value |
+|---|---|
+| S3 images (raw + processed) | **24 hours**, then auto-deleted via S3 lifecycle rule |
+| Presigned download URLs | **24-hour** expiration |
+| Postgres job records | Pruned after **24 hours** via Celery Beat periodic task |
+
+> [!TIP]
+> **Why This Matters (Interview)**: "We set 24-hour retention with auto-pruning at every layer — S3 lifecycle rules delete objects, a Celery Beat task cleans Postgres. This shows we thought about data lifecycle during design, not as an afterthought."
+
+### Performance Constraints
+
+| Spec | Value |
+|---|---|
+| Max image resolution | **1080p** (1920×1080) — 2K exceeds ML worker memory on CPU |
+| Task timeout | **60 seconds** per task |
+| Standard worker concurrency | **5** (`default_queue`) |
+| ML worker concurrency | **1** (`ml_inference_queue`) |
+| DnCNN inference mode | `torch.inference_mode()` — peak ~1.1GB at 1080p |
+
+---
+
 ## Proposed Changes
 
 ### Project Scaffold
@@ -94,7 +139,7 @@ d:\Github\PixTools\
 │   └── tasks/
 │       ├── __init__.py
 │       ├── celery_app.py         # Celery app config + queue routing + DLQ
-│       ├── image_ops.py          # resize, webp, avif tasks
+│       ├── image_ops.py          # jpg, png, webp, avif conversion tasks
 │       ├── ml_ops.py             # denoise (DnCNN inference) task
 │       └── finalize.py           # finalize_job chord callback
 ├── models/                       # Pretrained weights
@@ -271,10 +316,11 @@ Single-page layout with three states:
 │  ═══════════════════════════════              │
 │                                              │
 │  ┌─────────────────┐  ┌────────────────────┐ │
-│  │                 │  │ ☐ RESIZE           │ │
-│  │  DROP IMAGE     │  │ ☐ WEBP             │ │
-│  │  HERE           │  │ ☐ AVIF             │ │
-│  │  [preview]      │  │ ☐ DENOISE (AI)     │ │
+│  │                 │  │ ☐ JPG              │ │
+│  │  DROP IMAGE     │  │ ☐ PNG              │ │
+│  │  HERE           │  │ ☐ WEBP             │ │
+│  │  [preview]      │  │ ☐ AVIF             │ │
+│  │                 │  │ ☐ DENOISE (AI)     │ │
 │  │                 │  │                    │ │
 │  └─────────────────┘  │  [ ■ PROCESS ]     │ │
 │                       └────────────────────┘ │
@@ -290,7 +336,7 @@ PROCESS button replaced by a thick-bordered progress indicator. Job ID shown. Po
 │  RESULTS FOR JOB abc-123                     │
 │                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐     │
-│  │ RESIZE   │ │ WEBP     │ │ DENOISE  │     │
+│  │ WEBP     │ │ AVIF     │ │ DENOISE  │     │
 │  │ [thumb]  │ │ [thumb]  │ │ [thumb]  │     │
 │  │[DOWNLOAD]│ │[DOWNLOAD]│ │[DOWNLOAD]│     │
 │  └──────────┘ └──────────┘ └──────────┘     │
@@ -341,8 +387,8 @@ Vanilla JS handling:
 > **Why This Matters (Interview)**: "A DLQ means no message is ever silently lost. If an image has a corrupted header that crashes Pillow every time, after 3 retries it lands in the dead letter queue. We can inspect it, fix the bug, and replay the message. This is how production message queues work at scale."
 
 #### [NEW] [image_ops.py](file:///d:/Github/PixTools/app/tasks/image_ops.py)
-Tasks: `resize`, `convert_webp`, `convert_avif`
-Each task: download from S3 → transform with Pillow → upload to S3 → return S3 URL. Every task logs `job_id` + `request_id` (correlation) on start/finish.
+Tasks: `convert_jpg`, `convert_png`, `convert_webp`, `convert_avif`
+Each task: download from S3 → convert format with Pillow → upload to S3 → return S3 URL. Every task logs `job_id` + `request_id` (correlation) on start/finish.
 
 #### [NEW] [ml_ops.py](file:///d:/Github/PixTools/app/tasks/ml_ops.py)
 Task: `denoise` — downloads image, runs DnCNN inference, uploads denoised result. Bound to `ml_inference_queue`.
@@ -735,4 +781,4 @@ These additions transform the project from "working demo" to "production-aware s
 
 2. **Idempotency test**: Send the same request with the same `Idempotency-Key` twice. Second request should return `200` with the same `job_id` immediately.
 
-3. **DAG test**: Send a request with `["resize", "webp", "avif"]`. Verify all three processed images appear in S3 and the webhook payload contains all three URLs.
+3. **DAG test**: Send a request with `["webp", "avif", "denoise"]`. Verify all three processed images appear in S3 and the webhook payload contains all three URLs.

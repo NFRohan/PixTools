@@ -76,7 +76,7 @@ services:
   # ---------- Celery Workers ----------
   worker-standard:
     build: .
-    command: celery -A app.tasks.celery_app worker -Q default_queue --concurrency=4 --loglevel=info
+    command: celery -A app.tasks.celery_app worker -Q default_queue --concurrency=5 --loglevel=info
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://pixtools:pixtools@postgres:5432/pixtools

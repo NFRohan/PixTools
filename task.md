@@ -13,7 +13,7 @@
 - [x] `Dockerfile` — multi-stage build
 - [x] `docker-compose.yaml` — FastAPI + Postgres + Redis + RabbitMQ + LocalStack
 - [x] `.env.example`
-- [ ] **Verify**: `docker-compose up` boots, `/docs` loads, DB connects
+- [x] **Verify**: `docker-compose up` boots, `/docs` loads, DB connects
 
 ---
 
@@ -25,7 +25,7 @@
 - [ ] `app/services/idempotency.py` — Redis check/set
 - [ ] `app/services/dag_builder.py` — Canvas chain/chord builder
 - [ ] `app/tasks/celery_app.py` — Celery config + queue routing
-- [ ] `app/tasks/image_ops.py` — resize, convert_webp, convert_avif
+- [ ] `app/tasks/image_ops.py` — convert_jpg, convert_png, convert_webp, convert_avif
 - [ ] `app/tasks/finalize.py` — DB update + webhook POST
 - [ ] `tests/test_api.py`, `tests/test_dag_builder.py`, `tests/test_tasks.py`
 - [ ] **Verify**: Upload image → task runs → processed image in S3 → webhook fires
