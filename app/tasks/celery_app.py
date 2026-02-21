@@ -55,14 +55,18 @@ celery_app.conf.task_reject_on_worker_lost = True
 celery_app.conf.worker_prefetch_multiplier = 1
 celery_app.conf.broker_connection_retry_on_startup = True
 
+# Disable AMQP heartbeats so RabbitMQ doesn't drop the connection when 
+# the solo-pool worker is blocked for >60 seconds running ML inference.
+celery_app.conf.broker_heartbeat = 0
+
 # --- Serialization ---
 celery_app.conf.accept_content = ["json"]
 celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"
 
 # --- Task limits ---
-celery_app.conf.task_time_limit = 60  # hard kill after 60s
-celery_app.conf.task_soft_time_limit = 55  # raise SoftTimeLimitExceeded at 55s
+celery_app.conf.task_time_limit = 300  # hard kill after 300s (5m)
+celery_app.conf.task_soft_time_limit = 290  # raise SoftTimeLimitExceeded at 290s
 celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 
 # --- Import task modules so they register with the app ---

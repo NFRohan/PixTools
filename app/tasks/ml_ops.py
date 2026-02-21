@@ -18,10 +18,9 @@ _model = None
 def load_model(**kwargs):
     """Load the model once at worker startup."""
     global _model
-    logger.info("Loading DnCNN model into memory...")
-    
-    # Restrict PyTorch CPU threads to prevent OOM on Docker host
-    torch.set_num_threads(1)
+    # Restrict PyTorch CPU threads to 4 to balance speed and memory footprint 
+    # (Default uses all cores which causes OOM, 1 is too slow and causes timeouts)
+    torch.set_num_threads(4)
     
     _model = DnCNN()
     # Ensure map_location="cpu" since workers are cpu-only

@@ -98,7 +98,7 @@ services:
 
   worker-ml:
     build: .
-    command: celery -A app.tasks.celery_app worker -Q ml_inference_queue --concurrency=1 --loglevel=info
+    command: celery -A app.tasks.celery_app worker -Q ml_inference_queue --pool=solo --without-gossip --without-mingle --loglevel=info
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://pixtools:pixtools@postgres:5432/pixtools
