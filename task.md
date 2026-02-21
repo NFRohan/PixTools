@@ -43,14 +43,14 @@
 
 ---
 
-## Sprint 4: DnCNN ML Integration
+## Sprint 4: DnCNN ML Integration ✅
 > **Goal**: Denoise task runs real inference with `dncnn_color_blind.pth`.
 
-- [ ] `app/ml/dncnn.py` — DnCNN model definition (20-layer, 64ch, RGB)
-- [ ] `app/tasks/ml_ops.py` — denoise task with singleton model loading
-- [ ] Place `dncnn_color_blind.pth` in `models/`
-- [ ] ML worker queue isolation (`ml_inference_queue`, `--concurrency=1`)
-- [ ] **Verify**: Upload noisy image with `["denoise"]` → denoised output in S3
+- [x] `app/ml/dncnn.py` — DnCNN model definition (20-layer, 64ch, RGB)
+- [x] `app/tasks/ml_ops.py` — denoise task with singleton model loading
+- [x] Place `dncnn_color_blind.pth` in `models/`
+- [x] ML worker queue isolation (`ml_inference_queue`, `--concurrency=1`)
+- [x] **Verify**: Upload noisy image with `["denoise"]` → denoised output in S3
 
 ---
 

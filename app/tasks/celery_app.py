@@ -68,5 +68,4 @@ celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 # --- Import task modules so they register with the app ---
 import app.tasks.image_ops  # noqa: F401
 import app.tasks.finalize  # noqa: F401
-
-# ml_ops imported in Sprint 4 when ready
+import app.tasks.ml_ops  # noqa: F401
