@@ -2,12 +2,12 @@
 
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, HttpUrl
 
 
-class OperationType(str, Enum):
+class OperationType(StrEnum):
     """Supported image operations."""
 
     JPG = "jpg"

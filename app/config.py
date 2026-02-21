@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     aws_endpoint_url: str | None = None  # set for LocalStack
 
     # Database (RDS)
-    database_url: str = "postgresql+asyncpg://pixtools:pixtools@localhost:5432/pixtools"
+    database_url: str = "sqlite+aiosqlite:///pixtools.db"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -50,7 +50,14 @@ class Settings(BaseSettings):
     presigned_url_expiry_seconds: int = 86400  # 24 hours
     job_retention_hours: int = 24
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Notifications (optional)
+    alert_email: str | None = None
+
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
+    }
 
 
 settings = Settings()

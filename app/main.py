@@ -8,8 +8,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.database import engine
+from app.logging_config import request_id_ctx, setup_logging
 from app.models import Base
-from app.logging_config import setup_logging, request_id_ctx
 
 # Initialize structured logging globally
 setup_logging()
@@ -41,8 +41,9 @@ def create_app() -> FastAPI:
     )
 
     # --- Middleware ---
-    from fastapi import Request
     import uuid
+
+    from fastapi import Request
 
     @application.middleware("http")
     async def request_id_middleware(request: Request, call_next):
@@ -57,8 +58,8 @@ def create_app() -> FastAPI:
             request_id_ctx.reset(token)
 
     # --- Register routers ---
-    from app.routers.jobs import router as jobs_router
     from app.routers.health import router as health_router
+    from app.routers.jobs import router as jobs_router
 
     application.include_router(jobs_router, prefix="/api")
     application.include_router(health_router, prefix="/api")

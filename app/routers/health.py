@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-from redis.asyncio import Redis
-import boto3
 import logging
 
-from app.database import engine
+import boto3
+from fastapi import APIRouter, HTTPException, status
+from redis.asyncio import Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
+from app.database import engine
 
 router = APIRouter(tags=["ops"])
 logger = logging.getLogger(__name__)
@@ -22,13 +23,13 @@ async def health_check():
             "s3": "unknown"
         }
     }
-    
+
     # 1. Database Check
     try:
         async with AsyncSession(engine) as session:
             await session.execute(text("SELECT 1"))
         health_status["dependencies"]["database"] = "ok"
-    except Exception as e:
+    except Exception:
         logger.error("Health check failed: Database unreachable", exc_info=True)
         health_status["dependencies"]["database"] = "unreachable"
         health_status["status"] = "unhealthy"
@@ -39,7 +40,7 @@ async def health_check():
         await redis_client.ping()
         await redis_client.aclose()
         health_status["dependencies"]["redis"] = "ok"
-    except Exception as e:
+    except Exception:
         logger.error("Health check failed: Redis unreachable", exc_info=True)
         health_status["dependencies"]["redis"] = "unreachable"
         health_status["status"] = "unhealthy"
@@ -54,7 +55,7 @@ async def health_check():
         )
         s3.head_bucket(Bucket=settings.aws_s3_bucket)
         health_status["dependencies"]["s3"] = "ok"
-    except Exception as e:
+    except Exception:
         logger.error("Health check failed: S3 unreachable", exc_info=True)
         health_status["dependencies"]["s3"] = "unreachable"
         health_status["status"] = "unhealthy"
@@ -64,5 +65,5 @@ async def health_check():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=health_status
         )
-        
+
     return health_status

@@ -16,3 +16,11 @@ torch==2.5.1+cpu
 python-multipart==0.0.20
 psycopg2-binary==2.9.10
 numpy==2.2.3
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.3
+moto[s3]==5.0.28
+pytest-mock==3.14.0
+pytest-cov==6.0.0
+aiosqlite==0.21.0

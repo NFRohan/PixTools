@@ -1,10 +1,11 @@
 """DnCNN Machine Learning tasks."""
 
 import logging
+
 import numpy as np
 import torch
-from PIL import Image
 from celery.signals import worker_init
+from PIL import Image
 
 from app.ml.dncnn import DnCNN
 from app.services.s3 import download_raw, upload_processed
@@ -18,10 +19,10 @@ _model = None
 def load_model(**kwargs):
     """Load the model once at worker startup."""
     global _model
-    # Restrict PyTorch CPU threads to 4 to balance speed and memory footprint 
+    # Restrict PyTorch CPU threads to 4 to balance speed and memory footprint
     # (Default uses all cores which causes OOM, 1 is too slow and causes timeouts)
     torch.set_num_threads(4)
-    
+
     _model = DnCNN()
     # Ensure map_location="cpu" since workers are cpu-only
     _model.load_state_dict(torch.load("models/dncnn_color_blind.pth", map_location="cpu"))
@@ -39,10 +40,10 @@ def denoise(self, job_id: str, s3_raw_key: str) -> str:
 
     try:
         logger.info("Job %s: starting DnCNN denoising", job_id)
-        
+
         # 1. Download image
         image = download_raw(s3_raw_key).convert("RGB")
-        
+
         # 2. Preprocess: PIL Image -> numpy [H, W, 3] -> tensor [1, 3, H, W] in [0, 1]
         img_np = np.array(image, dtype=np.float32) / 255.0
         # HWC to CHW
@@ -53,7 +54,7 @@ def denoise(self, job_id: str, s3_raw_key: str) -> str:
         # 3. Inference
         with torch.inference_mode():
             tensor_out = _model(tensor_in)
-            
+
         # 4. Postprocess: tensor [1, 3, H, W] -> numpy [H, W, 3] -> [0, 255] uint8 -> PIL Image
         # clamp to [0, 1]
         tensor_out = torch.clamp(tensor_out, 0.0, 1.0)
@@ -61,13 +62,13 @@ def denoise(self, job_id: str, s3_raw_key: str) -> str:
         # CHW to HWC
         out_np = np.transpose(out_np, (1, 2, 0))
         out_img_np = (out_np * 255.0).round().astype(np.uint8)
-        
+
         out_image = Image.fromarray(out_img_np)
-        
+
         # 5. Upload to S3
         # Denoised image benefits from lossless format to prevent reintroducing JPEG compression noise
         s3_key = upload_processed(out_image, job_id, "denoise", "PNG")
-        
+
         logger.info("Job %s: denoising complete → %s", job_id, s3_key)
         return s3_key
 

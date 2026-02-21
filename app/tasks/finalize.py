@@ -2,12 +2,13 @@
 
 import logging
 
-from sqlalchemy import create_engine, update
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Job, JobStatus
 from app.services.s3 import generate_presigned_url
+from app.services.webhook import notify_job_update
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,6 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
     # --- Fire Webhook (Non-blocking sync-over-async wrapper) ---
     if webhook_url:
         import asyncio
-        from app.services.webhook import notify_job_update
         try:
             # Celery workers are synchronous, so we run the async webhook delivery using a new event loop
             asyncio.run(notify_job_update(webhook_url, job_id, status.value, result_urls))

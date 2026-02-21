@@ -4,8 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import JSON, UUID, DateTime, Enum, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -15,7 +14,7 @@ class Base(DeclarativeBase):
     pass
 
 
-class JobStatus(str, enum.Enum):
+class JobStatus(enum.StrEnum):
     """Possible states for a processing job."""
 
     PENDING = "PENDING"
@@ -31,7 +30,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        UUID, primary_key=True, default=uuid.uuid4
     )
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, name="job_status"), default=JobStatus.PENDING, index=True

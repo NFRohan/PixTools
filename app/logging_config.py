@@ -1,6 +1,7 @@
 import logging
 import sys
 from contextvars import ContextVar
+
 from pythonjsonlogger import jsonlogger
 
 # Context variables to store correlation IDs
@@ -17,7 +18,7 @@ class CorrelationIdFilter(logging.Filter):
 def setup_logging():
     """Configure structured JSON logging for both FastAPI and Celery."""
     log_handler = logging.StreamHandler(sys.stdout)
-    
+
     # Define JSON format (mapped from standard logging fields)
     # Using 'json' style allows us to rename keys directly in the record
     formatter = jsonlogger.JsonFormatter(
@@ -26,15 +27,15 @@ def setup_logging():
         datefmt="%Y-%m-%dT%H:%M:%SZ"
     )
     log_handler.setFormatter(formatter)
-    
+
     # Root logger configuration
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
-    
+
     # Remove existing handlers (to avoid duplicate logs from Uvicorn/FastAPI defaults)
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-        
+
     root_logger.addHandler(log_handler)
     root_logger.addFilter(CorrelationIdFilter())
 
@@ -42,5 +43,5 @@ def setup_logging():
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("pydantic").setLevel(logging.WARNING)
-    
+
     logging.info("Logging configured with JSON structure and ContextVars correlation")

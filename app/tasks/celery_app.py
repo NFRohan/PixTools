@@ -55,7 +55,7 @@ celery_app.conf.task_reject_on_worker_lost = True
 celery_app.conf.worker_prefetch_multiplier = 1
 celery_app.conf.broker_connection_retry_on_startup = True
 
-# Disable AMQP heartbeats so RabbitMQ doesn't drop the connection when 
+# Disable AMQP heartbeats so RabbitMQ doesn't drop the connection when
 # the solo-pool worker is blocked for >60 seconds running ML inference.
 celery_app.conf.broker_heartbeat = 0
 
@@ -70,13 +70,14 @@ celery_app.conf.task_soft_time_limit = 290  # raise SoftTimeLimitExceeded at 290
 celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 
 # --- Import task modules so they register with the app ---
-import app.tasks.image_ops  # noqa: F401
-import app.tasks.finalize  # noqa: F401
-import app.tasks.ml_ops  # noqa: F401
-
 # --- Logging & Correlation ID propagation ---
-from celery.signals import task_prerun, task_postrun, after_setup_logger, after_setup_task_logger
-from app.logging_config import setup_logging, request_id_ctx, job_id_ctx
+from celery.signals import after_setup_logger, after_setup_task_logger, task_postrun, task_prerun
+
+import app.tasks.finalize  # noqa: F401
+import app.tasks.image_ops  # noqa: F401
+import app.tasks.ml_ops  # noqa: F401
+from app.logging_config import job_id_ctx, request_id_ctx, setup_logging
+
 
 @after_setup_logger.connect
 @after_setup_task_logger.connect

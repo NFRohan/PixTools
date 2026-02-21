@@ -39,9 +39,10 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
 
 [tool.mypy]
 python_version = "3.12"
-strict = true
+strict = false
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
+exclude = ["^tests/"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -111,7 +111,7 @@ async def create_job(
     # --- Dispatch DAG ---
     from app.logging_config import request_id_ctx
     rid = request_id_ctx.get()
-    
+
     build_dag(str(job_id), s3_raw_key, [op.value for op in ops], request_id=rid)
     logger.info("Job %s created and dispatched", job_id)
 

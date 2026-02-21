@@ -1,9 +1,8 @@
 import logging
+from typing import Any
+
 import httpx
 import pybreaker
-from typing import Dict, Any
-
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,17 +14,17 @@ webhook_breaker = pybreaker.CircuitBreaker(
 )
 
 @webhook_breaker
-async def deliver_webhook(webhook_url: str, payload: Dict[str, Any]):
+async def deliver_webhook(webhook_url: str, payload: dict[str, Any]):
     """Delivers job status update via POST with circuit breaker protection."""
     logger.info("Delivering webhook to %s", webhook_url, extra={"webhook_url": webhook_url})
-    
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(webhook_url, json=payload)
         response.raise_for_status()
-        
+
     logger.info("Webhook delivered successfully")
 
-async def notify_job_update(webhook_url: str, job_id: str, status: str, result_urls: Dict[str, str]):
+async def notify_job_update(webhook_url: str, job_id: str, status: str, result_urls: dict[str, str]):
     """Higher-level helper to format and send the webhook."""
     if not webhook_url:
         return
@@ -35,7 +34,7 @@ async def notify_job_update(webhook_url: str, job_id: str, status: str, result_u
         "status": status,
         "result_urls": result_urls
     }
-    
+
     try:
         await deliver_webhook(webhook_url, payload)
     except pybreaker.CircuitBreakerError:
