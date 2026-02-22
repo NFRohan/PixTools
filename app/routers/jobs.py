@@ -6,7 +6,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -168,7 +168,7 @@ async def create_job(
         str,
         Form(description='JSON array of operations, e.g. ["webp","denoise"]'),
     ],
-    idempotency_key: Annotated[str | None, Form()] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     operation_params: Annotated[
         str | None,
         Form(description='Optional JSON object keyed by op, e.g. {"webp":{"quality":75}}'),

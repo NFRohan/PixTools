@@ -279,7 +279,6 @@ btnProcess.addEventListener('click', async () => {
     const formData = new FormData();
     formData.append('file', currentFile);
     formData.append('operations', JSON.stringify(ops));
-    formData.append('idempotency_key', idempotencyKey);
     if (Object.keys(opParams).length > 0) {
         formData.append('operation_params', JSON.stringify(opParams));
     }
@@ -290,6 +289,9 @@ btnProcess.addEventListener('click', async () => {
     try {
         const response = await fetch('/api/process', {
             method: 'POST',
+            headers: {
+                'Idempotency-Key': idempotencyKey
+            },
             body: formData // No Content-Type header needed for FormData
         });
 

@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import engine
-from app.logging_config import request_id_ctx, setup_logging
+from app.logging_config import setup_logging
+from app.middleware import register_request_id_middleware
 from app.models import Base
 
 # Initialize structured logging globally
@@ -52,21 +53,7 @@ def create_app() -> FastAPI:
     )
 
     # --- Middleware ---
-    import uuid
-
-    from fastapi import Request
-
-    @application.middleware("http")
-    async def request_id_middleware(request: Request, call_next):
-        """Extract or generate X-Request-ID for log correlation."""
-        rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-        token = request_id_ctx.set(rid)
-        try:
-            response = await call_next(request)
-            response.headers["X-Request-ID"] = rid
-            return response
-        finally:
-            request_id_ctx.reset(token)
+    register_request_id_middleware(application)
 
     # --- Register routers ---
     from app.routers.health import router as health_router
