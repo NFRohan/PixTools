@@ -20,6 +20,8 @@ async def test_health_check(client, mocker, test_engine):
     # Mock S3 head_bucket
     mock_s3 = mocker.patch("app.routers.health.boto3.client")
     mock_s3.return_value.head_bucket = MagicMock(return_value={})
+    mock_conn = mocker.patch("app.routers.health.Connection")
+    mock_conn.return_value.__enter__.return_value.connect = MagicMock(return_value=None)
 
     response = await client.get("/api/health")
     assert response.status_code == 200
@@ -28,6 +30,7 @@ async def test_health_check(client, mocker, test_engine):
     # Ensure database check passed either because of SELECT 1 or our test DB setup
     assert data["dependencies"]["database"] == "ok"
     assert data["dependencies"]["redis"] == "ok"
+    assert data["dependencies"]["rabbitmq"] == "ok"
     assert data["dependencies"]["s3"] == "ok"
 
 @pytest.mark.asyncio
@@ -51,6 +54,27 @@ async def test_create_job_success(client, s3_mock, mocker):
 
     # Verify DAG was dispatched
     mock_dag.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_job_idempotency_header_hit(client, mocker):
+    """Header-based idempotency should short-circuit to existing job id."""
+    existing_job_id = str(uuid.uuid4())
+    mocker.patch("app.routers.jobs.idempotency.check_idempotency", return_value=existing_job_id)
+    mock_set = mocker.patch("app.routers.jobs.idempotency.set_idempotency")
+    mock_upload = mocker.patch("app.routers.jobs.s3.upload_raw")
+    mock_dag = mocker.patch("app.routers.jobs.build_dag")
+
+    files = {"file": ("test.png", b"fake image data", "image/png")}
+    data = {"operations": json.dumps(["webp"])}
+    headers = {"Idempotency-Key": "demo-idempotency-key"}
+
+    response = await client.post("/api/process", files=files, data=data, headers=headers)
+    assert response.status_code == 202
+    assert response.json()["job_id"] == existing_job_id
+    mock_set.assert_not_called()
+    mock_upload.assert_not_called()
+    mock_dag.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_get_job_not_found(client):

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from PIL import Image
@@ -45,7 +45,7 @@ def test_finalize_job_logic(db_session):
 
     with patch("app.tasks.finalize.Session") as mock_session_cls, \
          patch("app.tasks.finalize.generate_presigned_url", return_value="http://presigned.url"), \
-         patch("app.tasks.finalize.notify_job_update"), \
+         patch("app.tasks.finalize.notify_job_update", new=AsyncMock(return_value=True)), \
          patch("app.tasks.finalize.celery_app.signature") as mock_signature:
 
         mock_session = MagicMock()
@@ -71,6 +71,32 @@ def test_finalize_job_logic(db_session):
         mock_session.commit.assert_called_once()
         assert mock_signature.call_count == 1
         assert mock_sig.apply_async.call_count == 1
+
+
+def test_finalize_job_marks_webhook_failed():
+    """Finalize should persist COMPLETED_WEBHOOK_FAILED when webhook fails."""
+    with patch("app.tasks.finalize.Session") as mock_session_cls, \
+         patch("app.tasks.finalize.generate_presigned_url", return_value="http://presigned.url"), \
+         patch("app.tasks.finalize.notify_job_update", new=AsyncMock(return_value=False)):
+        from app.tasks.finalize import finalize_job
+
+        mock_session_1 = MagicMock()
+        mock_session_2 = MagicMock()
+        mock_session_cls.return_value.__enter__.side_effect = [mock_session_1, mock_session_2]
+
+        mock_job_1 = MagicMock(spec=Job)
+        mock_job_1.original_filename = "test.png"
+        mock_job_1.webhook_url = "http://webhook.site"
+        mock_session_1.get.return_value = mock_job_1
+
+        mock_job_2 = MagicMock(spec=Job)
+        mock_session_2.get.return_value = mock_job_2
+
+        res = finalize_job(["processed/webp_random.webp"], "job-123")
+
+        assert res["status"] == "COMPLETED_WEBHOOK_FAILED"
+        assert mock_job_2.status == JobStatus.COMPLETED_WEBHOOK_FAILED
+        mock_session_2.commit.assert_called_once()
 
 
 def test_bundle_results_logic():
@@ -145,3 +171,21 @@ def test_gps_parser_handles_non_dict():
     from app.tasks.metadata import _gps_to_decimal
 
     assert _gps_to_decimal(12345) is None
+
+
+def test_prune_expired_jobs_logic():
+    """Maintenance task should execute delete and commit."""
+    with patch("app.tasks.maintenance.Session") as mock_session_cls:
+        from app.tasks.maintenance import prune_expired_jobs
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+        mock_result = MagicMock()
+        mock_result.rowcount = 3
+        mock_session.execute.return_value = mock_result
+
+        result = prune_expired_jobs()
+
+        assert result["deleted"] == 3
+        mock_session.execute.assert_called_once()
+        mock_session.commit.assert_called_once()

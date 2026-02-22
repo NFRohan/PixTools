@@ -27,8 +27,20 @@ def test_webhook_circuit_breaker_opens():
 async def test_notify_job_update_skips_on_empty_url(mocker):
     """Test that notifying skips if no URL is provided."""
     mock_deliver = mocker.patch("app.services.webhook.deliver_webhook")
-    await notify_job_update("", "job-1", "COMPLETED", {})
+    delivered = await notify_job_update("", "job-1", "COMPLETED", {})
+    assert delivered is True
     mock_deliver.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notify_job_update_returns_false_on_failure(mocker):
+    """Webhook helper should return False when delivery fails."""
+    mocker.patch(
+        "app.services.webhook.deliver_webhook",
+        new=AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    delivered = await notify_job_update("http://test.com", "job-1", "COMPLETED", {})
+    assert delivered is False
 
 def test_s3_upload_raw(s3_mock):
     """Test the S3 upload_raw wrapper."""
