@@ -2,6 +2,7 @@ import logging
 
 import boto3
 from fastapi import APIRouter, HTTPException, status
+from kombu import Connection
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ async def health_check():
         "dependencies": {
             "database": "unknown",
             "redis": "unknown",
+            "rabbitmq": "unknown",
             "s3": "unknown"
         }
     }
@@ -45,7 +47,17 @@ async def health_check():
         health_status["dependencies"]["redis"] = "unreachable"
         health_status["status"] = "unhealthy"
 
-    # 3. S3 Check
+    # 3. RabbitMQ Check
+    try:
+        with Connection(settings.rabbitmq_url, connect_timeout=5) as connection:
+            connection.connect()
+        health_status["dependencies"]["rabbitmq"] = "ok"
+    except Exception:
+        logger.error("Health check failed: RabbitMQ unreachable", exc_info=True)
+        health_status["dependencies"]["rabbitmq"] = "unreachable"
+        health_status["status"] = "unhealthy"
+
+    # 4. S3 Check
     try:
         s3 = boto3.client(
             "s3",

@@ -144,6 +144,30 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  beat:
+    build: .
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pixtools:pixtools@postgres:5432/pixtools
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_S3_BUCKET: pixtools-images
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
 volumes:
   pgdata:
   localstack_data:

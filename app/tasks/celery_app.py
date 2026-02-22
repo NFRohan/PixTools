@@ -1,6 +1,7 @@
 """Celery application configuration, queue routing, and DLQ setup."""
 
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Exchange, Queue
 
 from app.config import settings
@@ -48,7 +49,15 @@ celery_app.conf.task_routes = {
     "app.tasks.image_ops.*": {"queue": "default_queue"},
     "app.tasks.archive.*": {"queue": "default_queue"},
     "app.tasks.metadata.*": {"queue": "default_queue"},
+    "app.tasks.maintenance.*": {"queue": "default_queue"},
     "app.tasks.finalize.*": {"queue": "default_queue"},
+}
+
+celery_app.conf.beat_schedule = {
+    "prune-expired-jobs-hourly": {
+        "task": "app.tasks.maintenance.prune_expired_jobs",
+        "schedule": crontab(minute=0),
+    }
 }
 
 # --- Spot-instance resilience ---
@@ -78,6 +87,7 @@ from celery.signals import after_setup_logger, after_setup_task_logger, task_pos
 import app.tasks.archive  # noqa: F401
 import app.tasks.finalize  # noqa: F401
 import app.tasks.image_ops  # noqa: F401
+import app.tasks.maintenance  # noqa: F401
 import app.tasks.metadata  # noqa: F401
 import app.tasks.ml_ops  # noqa: F401
 from app.logging_config import job_id_ctx, request_id_ctx, setup_logging
