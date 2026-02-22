@@ -155,4 +155,4 @@
 - [ ] Implement ZIP Result Bundling <!-- task_id: zip_bundle -->
 - [ ] Implement Advanced Image Metadata (EXIF) <!-- task_id: exif_metadata -->
 - [ ] Implement Custom Webhook Sandbox <!-- task_id: webhook_sandbox -->
-- [ ] Implement Prometheus Metrics Exporter <!-- task_id: prometheus_metrics -->
+- [ ] Implement LGTM Stack (Loki, Grafana, Tempo, Mimir) <!-- task_id: lgtm_stack -->

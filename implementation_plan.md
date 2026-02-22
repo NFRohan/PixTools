@@ -36,14 +36,23 @@ Allow users to test integration with their own endpoints.
 - **[MODIFY] [app/routers/jobs.py](file:///d:/Github/PixTools/app/routers/jobs.py)**:
     - Pass the user-provided URL to the job entity. 
 
-### 5. Instrumentation (Prometheus)
-Shift towards standard observability patterns.
-- **[MODIFY] [app/main.py](file:///d:/Github/PixTools/app/main.py)**:
-    - Integrate `prometheus-fastapi-instrumentator`.
-- **[NEW] [app/metrics.py](file:///d:/Github/PixTools/app/metrics.py)**:
-    - Define custom metrics: `pixtools_jobs_processed_total`, `pixtools_inference_latency_seconds`.
-- **[MODIFY] [Dockerfile](file:///d:/Github/PixTools/Dockerfile)**:
-    - Expose the `/metrics` endpoint.
+### 5. Observability: LGTM Stack Integration
+Transition from simple logs/metrics to a modern, unified observability suite.
+- **[L] Loki (Logs)**: 
+    - Configure `promtail` or `fluent-bit` to scrape Docker/K8s logs and push to Loki.
+    - Ensure structured JSON logs from Sprint 5 are correctly parsed with labels (`job_id`, `status`).
+- **[G] Grafana (Visualization)**:
+    - Centralize data sources (Loki, Tempo, Mimir).
+    - Create a unified "Job Lifecycle" dashboard combining logs, traces, and metrics.
+- **[T] Tempo (Tracing)**:
+    - **[MODIFY] [app/main.py](file:///d:/Github/PixTools/app/main.py)** & **[app/tasks/celery_app.py](file:///d:/Github/PixTools/app/tasks/celery_app.py)**:
+        - Integrate OpenTelemetry (OTLP) instrumentation.
+        - Propagate trace contexts across FastAPI and Celery tasks.
+- **[M] Mimir (Metrics)**:
+    - **[NEW] [app/metrics.py](file:///d:/Github/PixTools/app/metrics.py)**:
+        - Export Prometheus metrics (high-cardinality) to Mimir for long-term storage and scalability.
+- **[MODIFY] [docker-compose.yaml](file:///d:/Github/PixTools/docker-compose.yaml)**:
+    - Add LGTM stack services for local verification.
 
 ---
 
@@ -52,7 +61,8 @@ Shift towards standard observability patterns.
 ### Automated Tests
 - **Parameterization**: Unit tests for Quality and Resize tasks.
 - **ZIP**: Integration test to verify ZIP generation from S3 sources.
-- **Metrics**: Verify `/metrics` returns valid Prometheus data.
+- **Metrics/Scaling**: Verify `/metrics` data flows into Mimir and can be queried in Grafana.
+- **Distributed Tracing**: Verify trace spans link from FastAPI request to Celery task execution in Tempo.
 
 ### Manual Verification
 1. **Dynamic UI**: Verify sliders/inputs appear/disappear correctly based on operation selection.
