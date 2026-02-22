@@ -1,85 +1,204 @@
-# PixTools 🎨
+# PixTools
 
-PixTools is a production-hardened, distributed image processing orchestrator. Built for high-volume transformation pipelines, it combines the speed of **FastAPI** with the massive parallelism of **Celery** to deliver a seamless, asynchronous image manipulation suite.
+PixTools is an asynchronous image-processing platform built on FastAPI + Celery.
+It accepts uploads, dispatches operations as background jobs, stores artifacts in S3-compatible storage, and exposes job status/results through a simple API and a built-in web UI.
 
----
+## What It Does
 
-## 🚀 Specialized Capabilities
+- Processes uploaded images asynchronously with a queued worker model.
+- Supports format conversion to `jpg`, `png`, `webp`, and `avif`.
+- Supports ML denoising (`denoise`) using a PyTorch DnCNN model.
+- Executes requested operations in parallel via Celery canvas (`group/chord`) and finalizes results in one callback.
+- Persists jobs in PostgreSQL and publishes result download links as presigned URLs.
+- Uses Redis-backed idempotency keys to prevent duplicate job creation.
+- Applies S3 lifecycle retention rules to clean up raw and processed objects.
+- Includes a deep health check endpoint for database, Redis, and S3 connectivity.
+- Includes a browser UI with drag/drop upload, polling, and local job history persistence.
 
-### ⚡ Distributed Execution Model
-Uses an asynchronous **Directed Acyclic Graph (DAG)** model to chain transformations. Complex multi-format conversions (WEBP, AVIF, PNG) and AI inference jobs are distributed across specific worker queues (Standard IO vs. Heavy ML compute).
+## Architecture
 
-### 🧠 Deep Learning Denoising
-Integrates a dedicated ML worker-pool utilizing a **PyTorch-based DnCNN model**. This provides algorithmic noise reduction for low-light or high-ISO captures, isolated on a dedicated queue with concurrency controls for optimal GPU/CPU utilization.
+`FastAPI API` -> `RabbitMQ broker` -> `Celery workers` -> `S3 storage` -> `PostgreSQL job state`
 
-### 💾 Automated Storage Optimization
-Implements **S3 Lifecycle Engines** to prevent cloud storage bloat.
-- **Auto-Cleanup**: Temporary raw and processed artifacts are automatically expired after **24 hours**.
-- **Self-Healing Policies**: Storage buckets and lifecycle rules are enforced automatically upon application startup.
+Key runtime components:
 
-### 🕵️ Anonymous Persistence & History
-Track your work without the friction of account creation.
-- **Client-Side Memory**: Leverages `localStorage` to persist your job history across browser sessions.
-- **Dynamic Link Healing**: The API dynamically regenerates S3 presigned URLs on every request, ensuring links work for the full duration of their retention window.
-- **Expiration Awareness**: Visual badges flag jobs passed their 24h retention window, preventing broken link frustration.
+- `api`: FastAPI application (`app.main`).
+- `worker-standard`: conversion/finalization tasks (`default_queue`).
+- `worker-ml`: ML denoising tasks (`ml_inference_queue`, solo pool).
+- `postgres`: job metadata and status.
+- `redis`: idempotency and Celery result backend.
+- `rabbitmq`: task broker and routing.
+- `localstack`: local S3-compatible endpoint for development.
 
-### 🛡️ Resilience Architecture
-*   **Circuit Breakers**: Outbound webhooks (webhook-sink-agnostic) are protected by `pybreaker` logic.
-*   **Dead Letter Queues (DLQ)**: Poisonous RabbitMQ payloads are quarantined to a `dlx` exchange for forensics.
-*   **Atomic Idempotency**: A Redis-backed 24-hour cache layer enforces strict job idempotency.
+## Tech Stack
 
----
+- Python 3.12
+- FastAPI
+- Celery + RabbitMQ + Redis
+- SQLAlchemy + Alembic
+- PostgreSQL
+- S3 (AWS or LocalStack)
+- PyTorch + NumPy + Pillow
+- Vanilla JS frontend
 
-## 🏗 Technology Stack
+## Repository Structure
 
-| Layer | Technology |
-| :--- | :--- |
-| **Backend** | Python 3.12 (FastAPI, Celery, SQLAlchemy) |
-| **Inference** | PyTorch (Pre-trained DnCNN) |
-| **UI** | Vanilla JS (Neobrutalist Styling) |
-| **Storage** | Amazon S3 / LocalStack |
-| **DB / Cache** | PostgreSQL, Redis, RabbitMQ |
-| **DevOps** | Docker, Alembic, Ruff, MyPy |
-
----
-
-## 🐳 Getting Started
-
-### 1. Boot the Ecosystem
-Spin up the orchestration plane and workers:
-```bash
-docker compose up -d
+```text
+app/
+  routers/        # API endpoints (/api/process, /api/jobs/{id}, /api/health)
+  tasks/          # Celery app, image ops, ML ops, finalize flow
+  services/       # S3, idempotency, DAG builder, webhook delivery
+  static/         # Browser UI (index.html, app.js, style.css)
+  ml/             # DnCNN model definition
+alembic/          # DB migrations
+models/           # Trained model weights (dncnn_color_blind.pth)
+tests/            # API, task, and service tests
 ```
 
-### 2. Synchronize Schemas
-Ensure the database and persistence layers are in their latest revision:
+## Getting Started (Docker)
+
+### Prerequisites
+
+- Docker + Docker Compose
+
+### 1. Configure Environment
+
+```bash
+cp .env.example .env
+```
+
+The compose file already injects local defaults for PostgreSQL, Redis, RabbitMQ, and LocalStack.
+
+### 2. Start Services
+
+```bash
+docker compose up -d --build
+```
+
+### 3. Run Migrations
+
 ```bash
 docker compose exec api alembic upgrade head
 ```
 
-### 3. Access the Tools
-- **Main App**: [http://localhost:8000](http://localhost:8000)
-- **Interactive API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+### 4. Open the App
 
----
+- UI: http://localhost:8000
+- OpenAPI: http://localhost:8000/docs
+- RabbitMQ UI: http://localhost:15672
 
-## 🧪 Testing & Quality Assurance
+## API Quick Reference
 
-PixTools maintains a rigorous testing protocol with **87%+ code coverage**.
+### `POST /api/process`
 
-### Automated Suite
+Uploads an image and queues one or more operations.
+
+- Content type: `multipart/form-data`
+- Required form fields:
+  - `file` (JPEG/PNG/WEBP/AVIF, max 10 MB by default)
+  - `operations` (JSON array, example `["webp","denoise"]`)
+- Optional form field:
+  - `idempotency_key` (replay-safe submission key)
+
+Example:
+
 ```bash
-# Run the full integration suite
+curl -X POST "http://localhost:8000/api/process" \
+  -F "file=@test_image.png" \
+  -F "operations=[\"webp\",\"denoise\"]" \
+  -F "idempotency_key=demo-123"
+```
+
+### `GET /api/jobs/{job_id}`
+
+Returns job state and generated download URLs when available.
+
+Example:
+
+```bash
+curl "http://localhost:8000/api/jobs/<job_id>"
+```
+
+### `GET /api/health`
+
+Deep dependency health check for DB, Redis, and S3.
+
+## Supported Operations
+
+- `jpg`
+- `png`
+- `webp`
+- `avif`
+- `denoise`
+
+Notes:
+
+- Conversion to the same source format is rejected.
+- Denoised output is uploaded as PNG.
+- Multiple operations in a single request run in parallel.
+
+## Configuration
+
+Settings are loaded from environment variables via `app/config.py`.
+Common variables:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `RABBITMQ_URL`
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `AWS_S3_BUCKET`
+- `AWS_ENDPOINT_URL` (set to LocalStack in local compose)
+- `MAX_UPLOAD_BYTES`
+- `PRESIGNED_URL_EXPIRY_SECONDS`
+- `S3_RETENTION_DAYS`
+
+Use `.env.example` as the baseline.
+
+## Development (Without Docker)
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run API:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Run workers:
+
+```bash
+celery -A app.tasks.celery_app worker -Q default_queue --concurrency=5 --loglevel=info
+celery -A app.tasks.celery_app worker -Q ml_inference_queue --pool=solo --without-gossip --without-mingle --loglevel=info
+```
+
+## Testing and Quality
+
+Run tests:
+
+```bash
 pytest -v --cov=app tests/
 ```
 
-### Static Analysis
+Static analysis:
+
 ```bash
 ruff check app tests
 mypy app
 ```
 
----
+## Operational Notes
 
-## 🛡 License
-Internal Project - All Rights Reserved.
+- Logging is structured JSON and includes request/task correlation IDs where available.
+- Celery queues are configured with a dead-letter exchange (`dlx`) for failed messages.
+- S3 lifecycle rules are applied at startup for both `raw/` and `processed/` prefixes.
+- A webhook circuit breaker is implemented (`pybreaker`) for outbound webhook delivery.
+- API key validation helper exists in `app/dependencies.py`, but is not currently attached to routes.
+
+## License
+
+Internal project. All rights reserved.
