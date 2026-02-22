@@ -1,124 +1,123 @@
 # PixTools
 
-PixTools is an asynchronous image-processing platform built on FastAPI + Celery.
-It accepts uploads, dispatches operations as background jobs, stores artifacts in S3-compatible storage, and exposes job status/results through a simple API and a built-in web UI.
+PixTools is an asynchronous image-processing service built with FastAPI, Celery, PostgreSQL, Redis, RabbitMQ, and S3-compatible object storage.
 
-## What It Does
+It accepts uploads, executes processing tasks in the background, and exposes downloadable results through presigned URLs and a web UI.
 
-- Processes uploaded images asynchronously with a queued worker model.
-- Supports format conversion to `jpg`, `png`, `webp`, and `avif`.
-- Supports ML denoising (`denoise`) using a PyTorch DnCNN model.
-- Executes requested operations in parallel via Celery canvas (`group/chord`) and finalizes results in one callback.
-- Persists jobs in PostgreSQL and publishes result download links as presigned URLs.
-- Uses Redis-backed idempotency keys to prevent duplicate job creation.
-- Applies S3 lifecycle retention rules to clean up raw and processed objects.
-- Includes a deep health check endpoint for database, Redis, and S3 connectivity.
-- Includes a browser UI with drag/drop upload, polling, and local job history persistence.
+## Core Capabilities
 
-## Architecture
+- Async job pipeline with Celery canvas (`group` + `chord`) and job finalization.
+- Format conversion: `jpg`, `png`, `webp`, `avif`.
+- ML denoising (`denoise`) via PyTorch DnCNN.
+- EXIF metadata extraction as a first-class operation (`metadata`).
+- Optional per-operation params:
+  - `quality` for `jpg` and `webp`
+  - `resize` for `jpg`, `png`, `webp`, `avif`, `denoise`
+- ZIP bundling of completed artifacts.
+- Optional outbound webhook on completion.
+- Idempotency key support for safe retries.
+- 24-hour retention model for job/result access.
 
-`FastAPI API` -> `RabbitMQ broker` -> `Celery workers` -> `S3 storage` -> `PostgreSQL job state`
+## High-Level Architecture
 
-Key runtime components:
+`Client/UI -> FastAPI -> RabbitMQ -> Celery workers -> S3 + PostgreSQL`
 
-- `api`: FastAPI application (`app.main`).
-- `worker-standard`: conversion/finalization tasks (`default_queue`).
-- `worker-ml`: ML denoising tasks (`ml_inference_queue`, solo pool).
-- `postgres`: job metadata and status.
-- `redis`: idempotency and Celery result backend.
-- `rabbitmq`: task broker and routing.
-- `localstack`: local S3-compatible endpoint for development.
+Runtime services in local Docker:
 
-## Tech Stack
+- `api`: FastAPI app (`app.main`)
+- `worker-standard`: conversion, finalize, archive, metadata tasks (`default_queue`)
+- `worker-ml`: denoising task (`ml_inference_queue`, solo pool)
+- `postgres`: job persistence
+- `redis`: idempotency + Celery result backend
+- `rabbitmq`: broker
+- `localstack`: local S3-compatible storage
+- `migrate`: one-shot Alembic migration runner
 
-- Python 3.12
-- FastAPI
-- Celery + RabbitMQ + Redis
-- SQLAlchemy + Alembic
-- PostgreSQL
-- S3 (AWS or LocalStack)
-- PyTorch + NumPy + Pillow
-- Vanilla JS frontend
-
-## Repository Structure
+## Repository Layout
 
 ```text
 app/
-  routers/        # API endpoints (/api/process, /api/jobs/{id}, /api/health)
-  tasks/          # Celery app, image ops, ML ops, finalize flow
-  services/       # S3, idempotency, DAG builder, webhook delivery
-  static/         # Browser UI (index.html, app.js, style.css)
-  ml/             # DnCNN model definition
-alembic/          # DB migrations
-models/           # Trained model weights (dncnn_color_blind.pth)
-tests/            # API, task, and service tests
+  routers/        # API endpoints
+  tasks/          # Celery tasks (image ops, metadata, archive, finalize, ML)
+  services/       # S3, DAG builder, idempotency, webhook delivery
+  static/         # Frontend UI (vanilla JS)
+  ml/             # DnCNN network definition
+alembic/          # Database migrations
+models/           # Model weights
+tests/            # API and task tests
 ```
 
-## Getting Started (Docker)
+## Quick Start (Docker)
 
-### Prerequisites
-
-- Docker + Docker Compose
-
-### 1. Configure Environment
+### 1. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-The compose file already injects local defaults for PostgreSQL, Redis, RabbitMQ, and LocalStack.
-
-### 2. Start Services
+### 2. Build and start
 
 ```bash
 docker compose up -d --build
 ```
 
-The stack now includes a one-off `migrate` service that runs `alembic upgrade head` before `api` and workers start.
+`migrate` runs `alembic upgrade head` before the API and workers start.
 
-### 3. Check Migration Logs
+### 3. Verify services
 
 ```bash
+docker compose ps
 docker compose logs -f migrate
 ```
 
-### 4. Open the App
+### 4. Open interfaces
 
-- UI: http://localhost:8000
-- OpenAPI: http://localhost:8000/docs
-- RabbitMQ UI: http://localhost:15672
+- App UI: http://localhost:8000
+- OpenAPI docs: http://localhost:8000/docs
+- RabbitMQ management: http://localhost:15672
 
-If you add a new migration later, run it explicitly:
+### 5. Re-run migrations manually (if needed)
 
 ```bash
 docker compose run --rm migrate
 ```
 
-## API Quick Reference
+## API Reference
 
 ### `POST /api/process`
 
-Uploads an image and queues one or more operations.
+Queues one or more operations for an uploaded image.
 
 - Content type: `multipart/form-data`
-- Required form fields:
-  - `file` (JPEG/PNG/WEBP/AVIF, max 10 MB by default)
-  - `operations` (JSON array, example `["webp","denoise"]`)
-- Optional form field:
-  - `idempotency_key` (replay-safe submission key)
+- Required fields:
+  - `file`
+  - `operations` JSON array (for example: `["webp","metadata"]`)
+- Optional fields:
+  - `operation_params` JSON object keyed by operation
+  - `idempotency_key`
+  - `webhook_url`
 
-Example:
+Example with quality + resize + webhook:
 
 ```bash
 curl -X POST "http://localhost:8000/api/process" \
   -F "file=@test_image.png" \
-  -F "operations=[\"webp\",\"denoise\"]" \
-  -F "idempotency_key=demo-123"
+  -F "operations=[\"webp\",\"denoise\",\"metadata\"]" \
+  -F "operation_params={\"webp\":{\"quality\":80},\"denoise\":{\"resize\":{\"width\":1280}}}" \
+  -F "webhook_url=https://webhook.site/<your-id>" \
+  -F "idempotency_key=demo-001"
 ```
 
 ### `GET /api/jobs/{job_id}`
 
-Returns job state and generated download URLs when available.
+Returns current job state:
+
+- `status`
+- `result_urls` (operation -> presigned URL)
+- `archive_url` (ZIP, when ready)
+- `metadata` (EXIF fields, if available)
+- `error_message`
+- `created_at`
 
 Example:
 
@@ -128,26 +127,56 @@ curl "http://localhost:8000/api/jobs/<job_id>"
 
 ### `GET /api/health`
 
-Deep dependency health check for DB, Redis, and S3.
+Deep dependency check for database, Redis, and S3.
 
-## Supported Operations
+## Operations
 
 - `jpg`
 - `png`
 - `webp`
 - `avif`
 - `denoise`
+- `metadata`
 
-Notes:
+Behavior notes:
 
-- Conversion to the same source format is rejected.
-- Denoised output is uploaded as PNG.
-- Multiple operations in a single request run in parallel.
+- Same-format conversion is rejected.
+- Denoise outputs PNG.
+- Metadata can run alone or alongside processing tasks.
+- ZIP download is generated asynchronously after processing completion.
+
+## Frontend Behavior
+
+- Drag/drop upload with preview and operation picker.
+- Quality slider appears only for `jpg`/`webp`.
+- Resize fields appear only for resize-capable operations.
+- Metadata rendered in a dedicated panel.
+- Completed downloadable jobs are persisted locally for up to 24 hours.
+- `Process Another` cancels active poll context to avoid stale result resurfacing.
+
+## Webhook Testing
+
+Use a request-capture endpoint (for example webhook.site):
+
+1. Create a temporary URL at https://webhook.site
+2. Submit a job with `webhook_url=<that-url>`
+3. Confirm payload receipt:
+
+```json
+{
+  "job_id": "<uuid>",
+  "status": "COMPLETED",
+  "result_urls": {
+    "webp": "https://..."
+  }
+}
+```
+
+For metadata-only jobs, `result_urls` is empty and metadata is available from `GET /api/jobs/{job_id}`.
 
 ## Configuration
 
-Settings are loaded from environment variables via `app/config.py`.
-Common variables:
+Key environment variables:
 
 - `DATABASE_URL`
 - `REDIS_URL`
@@ -156,14 +185,31 @@ Common variables:
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_REGION`
 - `AWS_S3_BUCKET`
-- `AWS_ENDPOINT_URL` (set to LocalStack in local compose)
+- `AWS_ENDPOINT_URL` (set for LocalStack, unset for AWS)
 - `MAX_UPLOAD_BYTES`
+- `MAX_IMAGE_WIDTH`
+- `MAX_IMAGE_HEIGHT`
 - `PRESIGNED_URL_EXPIRY_SECONDS`
+- `JOB_RETENTION_HOURS`
 - `S3_RETENTION_DAYS`
+- `IDEMPOTENCY_TTL_SECONDS`
+- `WEBHOOK_CB_FAIL_THRESHOLD`
+- `WEBHOOK_CB_RESET_TIMEOUT`
 
-Use `.env.example` as the baseline.
+See `.env.example` for baseline values.
 
-## Development (Without Docker)
+## AWS Deployment Notes
+
+For AWS deployment:
+
+- Use RDS Postgres for `DATABASE_URL`.
+- Use ElastiCache Redis for `REDIS_URL`.
+- Use Amazon MQ (RabbitMQ) or managed RabbitMQ-compatible endpoint for `RABBITMQ_URL`.
+- Use S3 bucket for `AWS_S3_BUCKET`.
+- Leave `AWS_ENDPOINT_URL` empty.
+- Ensure IAM credentials permit S3 read/write, lifecycle config, and presigned URL flow.
+
+## Development and Testing
 
 Install dependencies:
 
@@ -171,7 +217,7 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Run API:
+Run API locally:
 
 ```bash
 uvicorn app.main:app --reload
@@ -184,28 +230,30 @@ celery -A app.tasks.celery_app worker -Q default_queue --concurrency=5 --logleve
 celery -A app.tasks.celery_app worker -Q ml_inference_queue --pool=solo --without-gossip --without-mingle --loglevel=info
 ```
 
-## Testing and Quality
-
 Run tests:
 
 ```bash
 pytest -v --cov=app tests/
 ```
 
-Static analysis:
+Optional static checks:
 
 ```bash
 ruff check app tests
 mypy app
 ```
 
-## Operational Notes
+## Troubleshooting
 
-- Logging is structured JSON and includes request/task correlation IDs where available.
-- Celery queues are configured with a dead-letter exchange (`dlx`) for failed messages.
-- S3 lifecycle rules are applied at startup for both `raw/` and `processed/` prefixes.
-- A webhook circuit breaker is implemented (`pybreaker`) for outbound webhook delivery.
-- API key validation helper exists in `app/dependencies.py`, but is not currently attached to routes.
+Common local reset flow when schema/state is out of sync:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+docker compose logs -f migrate
+```
+
+If migrations succeed but app behavior is stale, restart API/workers and hard refresh the browser.
 
 ## License
 
