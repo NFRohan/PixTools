@@ -73,7 +73,8 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
             session.commit()
 
     if job_found and result_keys:
-        request_id = getattr(self.request, "headers", {}).get("X-Request-ID", "N/A")
+        headers = getattr(self.request, "headers", None) or {}
+        request_id = headers.get("X-Request-ID", "N/A")
         celery_app.signature(
             "app.tasks.archive.bundle_results",
             kwargs={
