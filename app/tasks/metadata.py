@@ -164,9 +164,22 @@ def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = 
         if mark_completed and webhook_url:
             import asyncio
             try:
-                asyncio.run(notify_job_update(webhook_url, job_id, JobStatus.COMPLETED.value, {}))
+                delivered = asyncio.run(
+                    notify_job_update(webhook_url, job_id, JobStatus.COMPLETED.value, {})
+                )
+                if not delivered:
+                    with Session(engine) as session:
+                        job = session.get(Job, job_id)
+                        if job:
+                            job.status = JobStatus.COMPLETED_WEBHOOK_FAILED
+                            session.commit()
             except Exception as exc:
                 logger.error("Failed metadata-only webhook for job %s: %s", job_id, exc, exc_info=True)
+                with Session(engine) as session:
+                    job = session.get(Job, job_id)
+                    if job:
+                        job.status = JobStatus.COMPLETED_WEBHOOK_FAILED
+                        session.commit()
 
         logger.info("Job %s: EXIF metadata extracted (%d fields)", job_id, len(metadata))
         return metadata
