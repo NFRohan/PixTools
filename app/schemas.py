@@ -15,6 +15,7 @@ class OperationType(StrEnum):
     WEBP = "webp"
     AVIF = "avif"
     DENOISE = "denoise"
+    METADATA = "metadata"
 
 
 class JobCreate(BaseModel):

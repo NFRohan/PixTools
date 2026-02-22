@@ -1,6 +1,6 @@
 import logging
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.config import settings
 from app.services.s3 import download_raw, upload_processed
@@ -84,6 +84,8 @@ def _convert(
     """Shared conversion logic for all format tasks."""
     logger.info("Job %s: starting %s conversion", job_id, operation_name)
     image = download_raw(s3_raw_key)
+    # Respect camera orientation so portrait images are not exported rotated.
+    image = ImageOps.exif_transpose(image)
     image = _resize_image(image, _parse_resize(params))
 
     save_kwargs: dict = {}

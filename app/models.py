@@ -38,6 +38,7 @@ class Job(Base):
     operations: Mapped[list] = mapped_column(JSON, nullable=False)
     result_urls: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     result_keys: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    exif_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     webhook_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     s3_raw_key: Mapped[str] = mapped_column(String(512), nullable=False)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -422,6 +422,30 @@ h4,
     gap: var(--space-lg);
 }
 
+.metadata-content {
+    margin-top: var(--space-sm);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--space-sm);
+}
+
+.metadata-item {
+    border: var(--border-thin);
+    background: #fff;
+    padding: 0.5rem 0.6rem;
+}
+
+.metadata-key {
+    font-family: var(--font-heading);
+    font-size: 0.78rem;
+    opacity: 0.8;
+}
+
+.metadata-value {
+    font-weight: 700;
+    word-break: break-word;
+}
+
 .result-card {
     background: var(--c-lime);
     padding: var(--space-md);
@@ -470,8 +494,16 @@ h4,
 }
 
 /* History */
-.history-title {
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-sm);
     margin-bottom: var(--space-md);
+}
+
+.history-title {
+    margin-bottom: 0;
 }
 
 .history-list {

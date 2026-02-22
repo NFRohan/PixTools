@@ -47,6 +47,7 @@ celery_app.conf.task_routes = {
     "app.tasks.ml_ops.denoise": {"queue": "ml_inference_queue"},
     "app.tasks.image_ops.*": {"queue": "default_queue"},
     "app.tasks.archive.*": {"queue": "default_queue"},
+    "app.tasks.metadata.*": {"queue": "default_queue"},
     "app.tasks.finalize.*": {"queue": "default_queue"},
 }
 
@@ -77,6 +78,7 @@ from celery.signals import after_setup_logger, after_setup_task_logger, task_pos
 import app.tasks.archive  # noqa: F401
 import app.tasks.finalize  # noqa: F401
 import app.tasks.image_ops  # noqa: F401
+import app.tasks.metadata  # noqa: F401
 import app.tasks.ml_ops  # noqa: F401
 from app.logging_config import job_id_ctx, request_id_ctx, setup_logging
 
@@ -100,7 +102,7 @@ def on_task_prerun(task_id, task, *args, **kwargs):
     # 2. Request ID: passed via headers['X-Request-ID'] or kwargs
     # Search in headers (passed via apply_async)
     request_stack = task.request_stack.top
-    headers = request_stack.headers if request_stack else {}
+    headers = (request_stack.headers if request_stack else {}) or {}
     request_id = headers.get("X-Request-ID", kwargs.get("request_id", "N/A"))
     request_id_ctx.set(request_id)
 

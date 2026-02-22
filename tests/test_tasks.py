@@ -69,8 +69,8 @@ def test_finalize_job_logic(db_session):
         assert "webp" in res["result_urls"]
         assert mock_job.status == JobStatus.COMPLETED
         mock_session.commit.assert_called_once()
-        mock_signature.assert_called_once()
-        mock_sig.apply_async.assert_called_once()
+        assert mock_signature.call_count == 1
+        assert mock_sig.apply_async.call_count == 1
 
 
 def test_bundle_results_logic():
@@ -89,3 +89,59 @@ def test_bundle_results_logic():
         assert archive_key == "archives/job/bundle.zip"
         assert mock_dl.call_count == 2
         mock_ul.assert_called_once()
+
+
+def test_extract_metadata_logic():
+    """EXIF task should persist parsed metadata to the job row."""
+    with patch("app.tasks.metadata.download_raw") as mock_download, \
+         patch("app.tasks.metadata.Session") as mock_session_cls:
+        from app.tasks.metadata import extract_metadata
+
+        mock_img = MagicMock()
+        mock_img.getexif.return_value = {}
+        mock_download.return_value = mock_img
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+        mock_job = MagicMock(spec=Job)
+        mock_session.get.return_value = mock_job
+
+        result = extract_metadata("job-123", "raw/job/input.jpg")
+
+        assert result == {}
+        assert mock_job.exif_metadata == {}
+        mock_session.commit.assert_called_once()
+
+
+def test_extract_metadata_mark_completed_logic():
+    """Metadata-only completion should mark job completed."""
+    with patch("app.tasks.metadata.download_raw") as mock_download, \
+         patch("app.tasks.metadata.Session") as mock_session_cls:
+        from app.tasks.metadata import extract_metadata
+
+        mock_img = MagicMock()
+        mock_img.getexif.return_value = {}
+        mock_download.return_value = mock_img
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+        mock_job = MagicMock(spec=Job)
+        mock_job.result_urls = None
+        mock_job.result_keys = None
+        mock_job.webhook_url = ""
+        mock_job.status = JobStatus.PENDING
+        mock_session.get.return_value = mock_job
+
+        result = extract_metadata("job-123", "raw/job/input.jpg", mark_completed=True)
+
+        assert result == {}
+        assert mock_job.status == JobStatus.COMPLETED
+        assert mock_job.result_urls == {}
+        assert mock_job.result_keys == {}
+
+
+def test_gps_parser_handles_non_dict():
+    """GPS parser should tolerate non-dict GPSInfo values."""
+    from app.tasks.metadata import _gps_to_decimal
+
+    assert _gps_to_decimal(12345) is None

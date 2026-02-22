@@ -67,6 +67,11 @@
                             <span class="op-box"></span>
                             <span class="op-label">DENOISE (AI)</span>
                         </label>
+                        <label class="op-checkbox default-op">
+                            <input type="checkbox" name="operation" value="metadata">
+                            <span class="op-box"></span>
+                            <span class="op-label">METADATA (EXIF)</span>
+                        </label>
                     </div>
                     <!-- Inline error container -->
                     <div id="ops-error" class="error-toast hidden"></div>
@@ -80,7 +85,7 @@
                             <span id="quality-value" class="mono-text">80</span>
                         </div>
 
-                        <div class="param-row">
+                        <div id="resize-control" class="param-row">
                             <label for="resize-width">Resize</label>
                             <div class="resize-group">
                                 <input id="resize-width" type="number" min="1" step="1" placeholder="width">
@@ -126,11 +131,18 @@
             <div id="result-cards-container" class="results-grid">
                 <!-- Cards injected here via JS -->
             </div>
+            <div id="metadata-panel" class="card-neo bg-white hidden">
+                <h3>METADATA</h3>
+                <div id="metadata-content" class="metadata-content"></div>
+            </div>
         </section>
 
         <!-- Previous Jobs Area (Hidden initially) -->
         <section id="history-section" class="history-area hidden mt-loose">
-            <h3 class="history-title">── PREVIOUS JOBS ────────────────────────</h3>
+            <div class="history-header">
+                <h3 class="history-title">── PREVIOUS JOBS ────────────────────────</h3>
+                <button id="btn-clear-history" class="btn-neo btn-secondary btn-small">CLEAR HISTORY</button>
+            </div>
             <div id="history-container" class="history-list">
                 <!-- History items injected here via JS -->
             </div>

@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import torch
 from celery.signals import worker_init
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.config import settings
 from app.ml.dncnn import DnCNN
@@ -76,7 +76,7 @@ def denoise(self, job_id: str, s3_raw_key: str, params: dict | None = None) -> s
         logger.info("Job %s: starting DnCNN denoising", job_id)
 
         # 1. Download image
-        image = download_raw(s3_raw_key).convert("RGB")
+        image = ImageOps.exif_transpose(download_raw(s3_raw_key)).convert("RGB")
         image = _apply_resize_if_requested(image, params)
 
         # 2. Preprocess: PIL Image -> numpy [H, W, 3] -> tensor [1, 3, H, W] in [0, 1]

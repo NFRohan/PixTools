@@ -18,6 +18,7 @@ const checkboxes = document.querySelectorAll('input[name="operation"]');
 const opsError = document.getElementById('ops-error');
 const advancedControls = document.getElementById('advanced-controls');
 const qualityControl = document.getElementById('quality-control');
+const resizeControl = document.getElementById('resize-control');
 const qualityRange = document.getElementById('quality-range');
 const qualityValue = document.getElementById('quality-value');
 const resizeWidthInput = document.getElementById('resize-width');
@@ -33,9 +34,12 @@ const resultCardsContainer = document.getElementById('result-cards-container');
 const webhookWarning = document.getElementById('webhook-warning');
 const btnDownloadAll = document.getElementById('btn-download-all');
 const btnProcessAnother = document.getElementById('btn-process-another');
+const metadataPanel = document.getElementById('metadata-panel');
+const metadataContent = document.getElementById('metadata-content');
 
 const historySection = document.getElementById('history-section');
 const historyContainer = document.getElementById('history-container');
+const btnClearHistory = document.getElementById('btn-clear-history');
 
 // Templates
 const tplResultCard = document.getElementById('tpl-result-card');
@@ -50,6 +54,7 @@ let currentFile = null;
 let currentExt = null;
 let currentFormat = null;
 let pollIntervalId = null;
+let pollToken = 0;
 let idempotencyKey = null;
 let currentJobData = null; // Store latest successful job data for history
 
@@ -58,12 +63,15 @@ const EXT_TO_FORMAT = {
     'jpg': 'jpg', 'jpeg': 'jpg', 'png': 'png',
     'webp': 'webp', 'avif': 'avif'
 };
+const QUALITY_OPS = new Set(['jpg', 'webp']);
+const RESIZE_OPS = new Set(['jpg', 'png', 'webp', 'avif', 'denoise']);
 
 // --- Initialization ---
 
 function init() {
     loadHistoryFromStorage();
     updateAdvancedControls();
+    btnClearHistory?.addEventListener('click', clearHistory);
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -180,7 +188,8 @@ function updateOpsAvailability() {
 function updateAdvancedControls() {
     const selectedOps = getSelectedOperations();
     const hasOps = selectedOps.length > 0;
-    const supportsQuality = selectedOps.some(op => op === 'jpg' || op === 'webp');
+    const supportsQuality = selectedOps.some(op => QUALITY_OPS.has(op));
+    const supportsResize = selectedOps.some(op => RESIZE_OPS.has(op));
 
     if (hasOps) {
         advancedControls.classList.remove('hidden');
@@ -192,6 +201,12 @@ function updateAdvancedControls() {
         qualityControl.classList.remove('hidden');
     } else {
         qualityControl.classList.add('hidden');
+    }
+
+    if (supportsResize) {
+        resizeControl.classList.remove('hidden');
+    } else {
+        resizeControl.classList.add('hidden');
     }
 }
 
@@ -216,11 +231,11 @@ function getOperationParams(selectedOps) {
     selectedOps.forEach(op => {
         const opParams = {};
 
-        if ((op === 'jpg' || op === 'webp') && !qualityControl.classList.contains('hidden')) {
+        if (QUALITY_OPS.has(op) && !qualityControl.classList.contains('hidden')) {
             opParams.quality = Number(qualityRange.value);
         }
 
-        if (hasResize) {
+        if (hasResize && RESIZE_OPS.has(op)) {
             const resize = {};
             if (widthRaw !== '') resize.width = Number(widthRaw);
             if (heightRaw !== '') resize.height = Number(heightRaw);
@@ -287,9 +302,6 @@ btnProcess.addEventListener('click', async () => {
         const jobId = data.job_id;
         jobIdDisplay.textContent = `Job: ${jobId.split('-')[0]}...`;
 
-        // Persist Job ID
-        saveJobToStorage(jobId);
-
         // Start polling
         startPolling(jobId);
 
@@ -302,13 +314,24 @@ btnProcess.addEventListener('click', async () => {
 // --- Polling ---
 
 function startPolling(jobId) {
-    if (pollIntervalId) clearInterval(pollIntervalId);
+    if (pollIntervalId) {
+        clearInterval(pollIntervalId);
+        pollIntervalId = null;
+    }
+    const currentPollToken = ++pollToken;
     let archivePollAttempts = 0;
     const maxArchivePollAttempts = 30;
 
     pollIntervalId = setInterval(async () => {
         try {
+            if (currentPollToken !== pollToken) {
+                return;
+            }
+
             const response = await fetch(`/api/jobs/${jobId}`);
+            if (currentPollToken !== pollToken) {
+                return;
+            }
             const data = await response.json();
 
             if (!response.ok) throw new Error(data.detail || "Failed to fetch status");
@@ -316,15 +339,33 @@ function startPolling(jobId) {
             const status = data.status;
 
             if (status === 'COMPLETED' || status === 'COMPLETED_WEBHOOK_FAILED') {
+                const previousJobData = currentJobData;
+                const previousMetadata = previousJobData?.metadata || {};
+                const currentMetadata = data.metadata || {};
+                const shouldRender =
+                    !previousJobData ||
+                    previousJobData.job_id !== data.job_id ||
+                    Boolean(previousJobData.archive_url) !== Boolean(data.archive_url) ||
+                    JSON.stringify(previousMetadata) !== JSON.stringify(currentMetadata);
+
                 currentJobData = data;
-                renderResults(data);
-                if (data.archive_url || archivePollAttempts >= maxArchivePollAttempts) {
+
+                if (shouldRender) {
+                    const shouldScroll = resultsSection.classList.contains('hidden');
+                    renderResults(data, { shouldScroll });
+                }
+
+                const hasResultFiles = Object.keys(data.result_urls || {}).length > 0;
+                const waitingForArchive = hasResultFiles && !data.archive_url;
+                if (!waitingForArchive || archivePollAttempts >= maxArchivePollAttempts) {
                     clearInterval(pollIntervalId);
+                    pollIntervalId = null;
                 } else {
                     archivePollAttempts += 1;
                 }
             } else if (status === 'FAILED') {
                 clearInterval(pollIntervalId);
+                pollIntervalId = null;
                 showError(opsError, `Job Failed: ${data.error_message || 'Unknown error'}`);
                 restoreProcessButton();
             }
@@ -338,9 +379,11 @@ function startPolling(jobId) {
 
 // --- Results Rendering ---
 
-function renderResults(jobData) {
+function renderResults(jobData, options = {}) {
+    const shouldScroll = options.shouldScroll !== false;
     processIndicator.classList.add('hidden');
     resultCardsContainer.innerHTML = '';
+    metadataContent.innerHTML = '';
 
     if (jobData.status === 'COMPLETED_WEBHOOK_FAILED') {
         webhookWarning.classList.remove('hidden');
@@ -380,13 +423,53 @@ function renderResults(jobData) {
         resultCardsContainer.appendChild(clone);
     }
 
+    renderMetadata(jobData.metadata || {});
+    if (isJobDownloadable(jobData)) {
+        saveJobToStorage(jobData.job_id);
+    }
+
     resultsSection.classList.remove('hidden');
-    resultsSection.scrollIntoView({ behavior: 'smooth' });
+    if (shouldScroll) {
+        resultsSection.scrollIntoView({ behavior: 'smooth' });
+    }
+}
+
+function renderMetadata(metadata) {
+    const entries = Object.entries(metadata || {});
+    if (entries.length === 0) {
+        metadataPanel.classList.add('hidden');
+        return;
+    }
+
+    metadataPanel.classList.remove('hidden');
+
+    entries.forEach(([key, value]) => {
+        const item = document.createElement('div');
+        item.className = 'metadata-item';
+
+        const k = document.createElement('div');
+        k.className = 'metadata-key';
+        k.textContent = key.replaceAll('_', ' ').toUpperCase();
+
+        const v = document.createElement('div');
+        v.className = 'metadata-value';
+        v.textContent = typeof value === 'object' ? JSON.stringify(value) : String(value);
+
+        item.appendChild(k);
+        item.appendChild(v);
+        metadataContent.appendChild(item);
+    });
 }
 
 // --- Process Another / History ---
 
 btnProcessAnother.addEventListener('click', () => {
+    pollToken += 1;
+    if (pollIntervalId) {
+        clearInterval(pollIntervalId);
+        pollIntervalId = null;
+    }
+
     if (currentJobData) {
         moveToHistory(currentJobData);
         currentJobData = null;
@@ -394,6 +477,7 @@ btnProcessAnother.addEventListener('click', () => {
 
     resultsSection.classList.add('hidden');
     btnDownloadAll.classList.add('hidden');
+    metadataPanel.classList.add('hidden');
     restoreProcessButton();
     resetUploadState();
     dropZone.style.pointerEvents = 'auto';
@@ -401,7 +485,10 @@ btnProcessAnother.addEventListener('click', () => {
 });
 
 function moveToHistory(jobData) {
-    const isExpired = checkExpiry(jobData.created_at);
+    if (!isJobDownloadable(jobData)) {
+        return;
+    }
+
     historySection.classList.remove('hidden');
 
     const clone = tplHistoryItem.content.cloneNode(true);
@@ -412,31 +499,23 @@ function moveToHistory(jobData) {
 
     const linksContainer = clone.querySelector('.history-links');
 
-    if (isExpired) {
-        const span = document.createElement('span');
-        span.className = 'badge-expired';
-        span.textContent = 'EXPIRED';
-        span.title = 'Files were cleaned up after 24h retention period';
-        linksContainer.appendChild(span);
-    } else {
-        const urls = jobData.result_urls || {};
-        for (const [op, url] of Object.entries(urls)) {
-            const a = document.createElement('a');
-            a.href = url;
-            a.className = 'history-link';
-            a.textContent = op.toUpperCase();
-            const ext = op === 'denoise' ? 'result' : op;
-            a.download = `pixtools_${op}_${shortId}.${ext}`;
-            linksContainer.appendChild(a);
-        }
-        if (jobData.archive_url) {
-            const zipLink = document.createElement('a');
-            zipLink.href = jobData.archive_url;
-            zipLink.className = 'history-link';
-            zipLink.textContent = 'ZIP';
-            zipLink.download = `pixtools_bundle_${shortId}.zip`;
-            linksContainer.appendChild(zipLink);
-        }
+    const urls = jobData.result_urls || {};
+    for (const [op, url] of Object.entries(urls)) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.className = 'history-link';
+        a.textContent = op.toUpperCase();
+        const ext = op === 'denoise' ? 'result' : op;
+        a.download = `pixtools_${op}_${shortId}.${ext}`;
+        linksContainer.appendChild(a);
+    }
+    if (jobData.archive_url) {
+        const zipLink = document.createElement('a');
+        zipLink.href = jobData.archive_url;
+        zipLink.className = 'history-link';
+        zipLink.textContent = 'ZIP';
+        zipLink.download = `pixtools_bundle_${shortId}.zip`;
+        linksContainer.appendChild(zipLink);
     }
 
     historyContainer.prepend(clone);
@@ -463,32 +542,38 @@ async function loadHistoryFromStorage() {
     // We do this sequentially to avoid overwhelming the server, or use Promise.all
     const jobDataPromises = jobs.map(id => fetch(`/api/jobs/${id}`).then(r => r.ok ? r.json() : null));
     const allJobs = await Promise.all(jobDataPromises);
+    const validIds = [];
 
-    allJobs.forEach(data => {
-        if (!data) return;
-        if (data.status === 'COMPLETED' || data.status === 'COMPLETED_WEBHOOK_FAILED' || data.status === 'FAILED') {
-            moveToHistory(data);
-        } else {
-            // If it's still processing, resume polling in its own silo
-            // (Note: this simple implementation only supports one active poll in UI indicator,
-            // but we can start background polling here if we wanted to heal)
-            startPolling(data.job_id);
-            // Show processing state if it matches most recent
-            if (data.job_id === jobs[jobs.length - 1]) {
-                btnProcess.classList.add('hidden');
-                processIndicator.classList.remove('hidden');
-                jobIdDisplay.textContent = `Resuming: ${data.job_id.split('-')[0]}...`;
-            }
-        }
+    allJobs.forEach((data, index) => {
+        if (!isJobDownloadable(data)) return;
+        moveToHistory(data);
+        validIds.push(jobs[index]);
     });
+
+    const compacted = validIds.slice(-HISTORY_LIMIT);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
+    if (compacted.length === 0) {
+        historySection.classList.add('hidden');
+    }
 }
 
 function checkExpiry(isoString) {
-    if (!isoString) return false;
+    if (!isoString) return true;
     const created = new Date(isoString);
     const now = new Date();
     const diffHours = (now - created) / (1000 * 60 * 60);
     return diffHours >= RETENTION_HOURS;
+}
+
+function isJobDownloadable(jobData) {
+    if (!jobData) return false;
+    const done = jobData.status === 'COMPLETED' || jobData.status === 'COMPLETED_WEBHOOK_FAILED';
+    if (!done) return false;
+    if (checkExpiry(jobData.created_at)) return false;
+
+    const hasResultUrls = jobData.result_urls && Object.keys(jobData.result_urls).length > 0;
+    const hasArchive = Boolean(jobData.archive_url);
+    return hasResultUrls || hasArchive;
 }
 
 // --- Helpers ---
@@ -515,4 +600,9 @@ function showError(container, message) {
 function hideError(container) {
     container.classList.add('hidden');
     container.textContent = '';
+}
+function clearHistory() {
+    localStorage.removeItem(STORAGE_KEY);
+    historyContainer.innerHTML = '';
+    historySection.classList.add('hidden');
 }

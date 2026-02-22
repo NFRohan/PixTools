@@ -16,6 +16,7 @@ from app.models import Job, JobStatus
 from app.schemas import OperationType
 from app.services import idempotency, s3
 from app.services.dag_builder import build_dag
+from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ EXT_TO_FORMAT = {
     "webp": "webp",
     "avif": "avif",
 }
+QUALITY_SUPPORTED_OPS = {"jpg", "webp"}
+RESIZE_SUPPORTED_OPS = {"jpg", "png", "webp", "avif", "denoise"}
 
 
 def _validate_webhook_url(webhook_url: str | None) -> str:
@@ -79,7 +82,7 @@ def _parse_operation_params(raw_params: str | None, ops: list[OperationType]) ->
         out: dict = {}
         quality = op_params.get("quality")
         if quality is not None:
-            if op_name not in {"jpg", "webp"}:
+            if op_name not in QUALITY_SUPPORTED_OPS:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"operation_params['{op_name}'].quality is only supported for jpg/webp",
@@ -100,6 +103,11 @@ def _parse_operation_params(raw_params: str | None, ops: list[OperationType]) ->
 
         resize = op_params.get("resize")
         if resize is not None:
+            if op_name not in RESIZE_SUPPORTED_OPS:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"operation_params['{op_name}'].resize is only supported for jpg/png/webp/avif/denoise",
+                )
             if not isinstance(resize, dict):
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -203,7 +211,7 @@ async def create_job(
 
     source_ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else None
     source_format = EXT_TO_FORMAT.get(source_ext) if source_ext else None
-    conversion_ops = [op for op in ops if op != OperationType.DENOISE]
+    conversion_ops = [op for op in ops if op not in {OperationType.DENOISE, OperationType.METADATA}]
     for op in conversion_ops:
         if op.value == source_format:
             raise HTTPException(
@@ -237,13 +245,30 @@ async def create_job(
     from app.logging_config import request_id_ctx
 
     request_id = request_id_ctx.get()
-    build_dag(
-        str(job_id),
-        s3_raw_key,
-        [op.value for op in ops],
-        request_id=request_id,
-        operation_params=op_params,
-    )
+    op_values = [op.value for op in ops]
+    pipeline_ops = [op for op in op_values if op != OperationType.METADATA.value]
+    metadata_requested = OperationType.METADATA.value in op_values
+
+    if pipeline_ops:
+        build_dag(
+            str(job_id),
+            s3_raw_key,
+            pipeline_ops,
+            request_id=request_id,
+            operation_params=op_params,
+        )
+
+    if metadata_requested:
+        celery_app.signature(
+            "app.tasks.metadata.extract_metadata",
+            kwargs={
+                "job_id": str(job_id),
+                "s3_raw_key": s3_raw_key,
+                "mark_completed": not pipeline_ops,
+            },
+            headers={"X-Request-ID": request_id},
+        ).apply_async()
+
     logger.info("Job %s created and dispatched", job_id)
 
     return {"job_id": str(job_id), "status": "PENDING"}
@@ -287,6 +312,7 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "operations": job.operations,
         "result_urls": result_urls,
         "archive_url": archive_url,
+        "metadata": job.exif_metadata or {},
         "error_message": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
     }

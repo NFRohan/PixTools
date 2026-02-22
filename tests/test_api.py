@@ -88,6 +88,44 @@ async def test_create_job_with_params_and_webhook(client, mocker):
     kwargs = mock_dag.call_args.kwargs
     assert kwargs["operation_params"]["webp"]["quality"] == 75
 
+
+@pytest.mark.asyncio
+async def test_create_job_metadata_only_dispatch(client, mocker):
+    """Metadata-only jobs should dispatch metadata task without DAG."""
+    mock_dag = mocker.patch("app.routers.jobs.build_dag")
+    mocker.patch("app.routers.jobs.s3.upload_raw", return_value="raw/test.png")
+    mock_sig = MagicMock()
+    mock_signature = mocker.patch("app.routers.jobs.celery_app.signature", return_value=mock_sig)
+
+    files = {"file": ("test.png", b"fake image data", "image/png")}
+    data = {"operations": json.dumps(["metadata"])}
+
+    response = await client.post("/api/process", files=files, data=data)
+    assert response.status_code == 202
+    mock_dag.assert_not_called()
+    mock_sig.apply_async.assert_called_once()
+    _, called_kwargs = mock_signature.call_args
+    assert called_kwargs["kwargs"]["mark_completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_job_metadata_plus_conversion_dispatch(client, mocker):
+    """Mixed jobs should dispatch DAG + metadata task."""
+    mock_dag = mocker.patch("app.routers.jobs.build_dag")
+    mocker.patch("app.routers.jobs.s3.upload_raw", return_value="raw/test.png")
+    mock_sig = MagicMock()
+    mock_signature = mocker.patch("app.routers.jobs.celery_app.signature", return_value=mock_sig)
+
+    files = {"file": ("test.png", b"fake image data", "image/png")}
+    data = {"operations": json.dumps(["webp", "metadata"])}
+
+    response = await client.post("/api/process", files=files, data=data)
+    assert response.status_code == 202
+    mock_dag.assert_called_once()
+    mock_sig.apply_async.assert_called_once()
+    _, called_kwargs = mock_signature.call_args
+    assert called_kwargs["kwargs"]["mark_completed"] is False
+
 @pytest.mark.asyncio
 async def test_create_job_invalid_webhook_url(client):
     """Test validation error for malformed webhook URL."""
@@ -143,4 +181,35 @@ async def test_get_job_includes_archive_url(client, db_session, mocker):
     data = response.json()
     assert data["archive_url"] == "http://bundle.zip"
     assert data["result_urls"]["webp"] == "http://result.webp"
+    assert data["metadata"] == {}
     assert mock_presign.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_job_includes_metadata(client, db_session, mocker):
+    """Metadata should be exposed by GET /jobs/{id}."""
+    job_id = uuid.uuid4()
+    db_session.add(
+        Job(
+            id=job_id,
+            status=JobStatus.COMPLETED,
+            operations=["jpg"],
+            result_urls={},
+            result_keys={"jpg": "processed/job/jpg_abc.jpg"},
+            exif_metadata={"camera_make": "Canon", "iso": 400},
+            webhook_url="",
+            s3_raw_key="raw/job/input.jpg",
+            original_filename="photo.jpg",
+            retry_count=0,
+        )
+    )
+    await db_session.commit()
+
+    mocker.patch("app.routers.jobs.s3.object_exists", return_value=False)
+    mocker.patch("app.routers.jobs.s3.generate_presigned_url", return_value="http://result.jpg")
+
+    response = await client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"]["camera_make"] == "Canon"
+    assert data["metadata"]["iso"] == 400
