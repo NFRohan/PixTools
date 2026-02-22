@@ -65,15 +65,27 @@
 - [ ] `app/middleware.py` — RequestID middleware (correlation IDs)
 - [ ] `app/routers/health.py` — deep dependency health check
 - [ ] `app/services/webhook.py` — circuit breaker (pybreaker)
-- [ ] Dead Letter Queue config in `celery_app.py`
-- [ ] `alembic/` — env.py + initial migration
-- [ ] `tests/test_idempotency.py`
-- [ ] `pyproject.toml` — ruff + mypy config
-- [ ] **Verify**: Failing webhook trips circuit breaker, DLQ catches poison messages
 
 ---
 
-## Sprint 6: Infrastructure & Deployment
+## Sprint 6: Testing *(IN PROGRESS)*
+> **Goal**: 80%+ coverage and automated verification.
+
+- [x] Add testing dependencies to `requirements.txt`
+- [x] `tests/conftest.py` — Shared fixtures (mock DB, S3, client)
+- [x] `tests/test_api.py` — REST endpoint verification
+- [x] `tests/test_tasks.py` — Celery task logic verification
+- [x] `tests/test_services.py` — Webhook and S3 service verification
+- [x] **Verify**: All tests pass via `pytest`
+- [x] Dead Letter Queue config in `celery_app.py`
+- [x] `alembic/` — env.py + initial migration
+- [x] `tests/test_idempotency.py`
+- [x] `pyproject.toml` — ruff + mypy config
+- [x] **Verify**: Failing webhook trips circuit breaker, DLQ catches poison messages
+
+---
+
+## Sprint 6: Infrastructure & Deployment <!-- task_id: infrastructure -->
 > **Goal**: Full K3s + AWS IaC, monitoring, CI pipeline.
 
 - [ ] `k8s/namespace.yaml`
@@ -92,3 +104,55 @@
 - [ ] `.github/workflows/ci.yaml` — lint + type check + test + build + tf validate
 - [ ] `README.md`
 - [ ] **Verify**: `terraform validate`, `kubectl apply --dry-run`, CI pipeline passes
+
+---
+
+## Sprint 7: S3 Storage Optimization <!-- task_id: storage -->
+> **Goal**: Prevent storage bloat by cleaning up orphan files.
+
+- [x] Implement automated S3 orphan file cleanup <!-- task_id: cleanup -->
+    - [x] Create implementation plan <!-- task_id: cleanup_plan -->
+    - [x] Configure S3 Lifecycle Rules in `s3.py` <!-- task_id: cleanup_impl -->
+    - [x] Add `s3_retention_days` to `config.py` <!-- task_id: cleanup_config -->
+    - [x] Verify lifecycle policy via CLI/tests <!-- task_id: cleanup_verify -->
+
+---
+
+## Sprint 8: Anonymous Persistence & History <!-- task_id: persistence_sprint -->
+> **Goal**: Persistent job history across refreshes with expiration awareness.
+
+- [x] Implement Anonymous Job Persistence <!-- task_id: anon_persistence -->
+    - [x] Create implementation plan <!-- task_id: persistence_plan -->
+    - [x] Create Alembic migration for `result_keys` <!-- task_id: persistence_migration -->
+    - [x] Update `Job` model and `finalize_job` task <!-- task_id: persistence_backend -->
+    - [x] Update `GET /jobs/{id}` for dynamic presigning <!-- task_id: persistence_api -->
+    - [x] Implement `localStorage` logic in `app.js` <!-- task_id: persistence_ui -->
+    - [x] Add "Expired" badge logic for items > 24h <!-- task_id: persistence_expiry -->
+    - [x] **Verify**: Clear local storage, run job, refresh page, verify data remains.
+
+---
+
+## Sprint 9: Maintenance & Cleanup <!-- task_id: cleanup_sprint -->
+> **Goal**: Declutter codebase and improve maintainability.
+
+- [x] Remove temporary log files (`*.txt`, `*.log`) from root <!-- task_id: root_cleanup -->
+- [x] Remove accidental SQLite artifacts (`alembic.db`) <!-- task_id: db_cleanup -->
+
+---
+
+## Sprint 10: Documentation & Handover <!-- task_id: documentation_sprint -->
+> **Goal**: Provide a professional final state for the repository.
+
+- [x] Draft comprehensive git commit message <!-- task_id: git_commit -->
+- [x] Expand and professionalize `README.md` <!-- task_id: readme_expansion -->
+
+---
+
+## Sprint 11: Cloud Readiness & Advanced Features <!-- task_id: cloud_readiness_sprint -->
+> **Goal**: Final polish and observability before cloud migration.
+
+- [ ] Implement Operation Parameterization (Quality/Resize) <!-- task_id: op_params -->
+- [ ] Implement ZIP Result Bundling <!-- task_id: zip_bundle -->
+- [ ] Implement Advanced Image Metadata (EXIF) <!-- task_id: exif_metadata -->
+- [ ] Implement Custom Webhook Sandbox <!-- task_id: webhook_sandbox -->
+- [ ] Implement Prometheus Metrics Exporter <!-- task_id: prometheus_metrics -->
