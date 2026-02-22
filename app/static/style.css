@@ -397,6 +397,25 @@ h4,
     padding: var(--space-md) var(--space-lg);
 }
 
+.results-actions {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+}
+
+@media (max-width: 768px) {
+    .results-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-sm);
+    }
+
+    .results-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+}
+
 .results-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));

@@ -31,6 +31,7 @@ const jobIdDisplay = document.getElementById('job-id-display');
 const resultsSection = document.getElementById('results-section');
 const resultCardsContainer = document.getElementById('result-cards-container');
 const webhookWarning = document.getElementById('webhook-warning');
+const btnDownloadAll = document.getElementById('btn-download-all');
 const btnProcessAnother = document.getElementById('btn-process-another');
 
 const historySection = document.getElementById('history-section');
@@ -302,6 +303,8 @@ btnProcess.addEventListener('click', async () => {
 
 function startPolling(jobId) {
     if (pollIntervalId) clearInterval(pollIntervalId);
+    let archivePollAttempts = 0;
+    const maxArchivePollAttempts = 30;
 
     pollIntervalId = setInterval(async () => {
         try {
@@ -313,9 +316,13 @@ function startPolling(jobId) {
             const status = data.status;
 
             if (status === 'COMPLETED' || status === 'COMPLETED_WEBHOOK_FAILED') {
-                clearInterval(pollIntervalId);
                 currentJobData = data;
                 renderResults(data);
+                if (data.archive_url || archivePollAttempts >= maxArchivePollAttempts) {
+                    clearInterval(pollIntervalId);
+                } else {
+                    archivePollAttempts += 1;
+                }
             } else if (status === 'FAILED') {
                 clearInterval(pollIntervalId);
                 showError(opsError, `Job Failed: ${data.error_message || 'Unknown error'}`);
@@ -339,6 +346,14 @@ function renderResults(jobData) {
         webhookWarning.classList.remove('hidden');
     } else {
         webhookWarning.classList.add('hidden');
+    }
+
+    if (jobData.archive_url) {
+        btnDownloadAll.href = jobData.archive_url;
+        btnDownloadAll.download = `pixtools_bundle_${jobData.job_id.split('-')[0]}.zip`;
+        btnDownloadAll.classList.remove('hidden');
+    } else {
+        btnDownloadAll.classList.add('hidden');
     }
 
     const urls = jobData.result_urls || {};
@@ -378,6 +393,7 @@ btnProcessAnother.addEventListener('click', () => {
     }
 
     resultsSection.classList.add('hidden');
+    btnDownloadAll.classList.add('hidden');
     restoreProcessButton();
     resetUploadState();
     dropZone.style.pointerEvents = 'auto';
@@ -412,6 +428,14 @@ function moveToHistory(jobData) {
             const ext = op === 'denoise' ? 'result' : op;
             a.download = `pixtools_${op}_${shortId}.${ext}`;
             linksContainer.appendChild(a);
+        }
+        if (jobData.archive_url) {
+            const zipLink = document.createElement('a');
+            zipLink.href = jobData.archive_url;
+            zipLink.className = 'history-link';
+            zipLink.textContent = 'ZIP';
+            zipLink.download = `pixtools_bundle_${shortId}.zip`;
+            linksContainer.appendChild(zipLink);
         }
     }
 

@@ -152,7 +152,7 @@
 > **Goal**: Final polish and observability before cloud migration.
 
 - [x] Implement Operation Parameterization (Quality/Resize) <!-- task_id: op_params -->
-- [ ] Implement ZIP Result Bundling <!-- task_id: zip_bundle -->
+- [x] Implement ZIP Result Bundling <!-- task_id: zip_bundle -->
 - [ ] Implement Advanced Image Metadata (EXIF) <!-- task_id: exif_metadata -->
 - [x] Implement Custom Webhook Sandbox <!-- task_id: webhook_sandbox -->
 - [ ] Implement LGTM Stack (Loki, Grafana, Tempo, Mimir) <!-- task_id: lgtm_stack -->

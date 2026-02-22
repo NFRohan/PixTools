@@ -264,6 +264,7 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     # If result_urls are missing or expired (stored signed URLs have a TTL),
     # regenerate them on demand while files still exist in S3.
     result_urls = job.result_urls or {}
+    archive_url = None
     if job.status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WEBHOOK_FAILED] and job.result_keys:
         fresh_urls = {}
         original_base = job.original_filename.rsplit(".", 1)[0] if job.original_filename else "image"
@@ -275,11 +276,17 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
         result_urls = fresh_urls
 
+        archive_key = s3.get_archive_key(str(job.id))
+        if s3.object_exists(archive_key):
+            archive_name = f"pixtools_bundle_{original_base}.zip"
+            archive_url = s3.generate_presigned_url(archive_key, download_filename=archive_name)
+
     return {
         "job_id": str(job.id),
         "status": job.status.value,
         "operations": job.operations,
         "result_urls": result_urls,
+        "archive_url": archive_url,
         "error_message": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
     }

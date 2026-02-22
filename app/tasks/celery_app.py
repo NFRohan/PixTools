@@ -46,6 +46,7 @@ celery_app.conf.task_queues = [
 celery_app.conf.task_routes = {
     "app.tasks.ml_ops.denoise": {"queue": "ml_inference_queue"},
     "app.tasks.image_ops.*": {"queue": "default_queue"},
+    "app.tasks.archive.*": {"queue": "default_queue"},
     "app.tasks.finalize.*": {"queue": "default_queue"},
 }
 
@@ -73,6 +74,7 @@ celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 # --- Logging & Correlation ID propagation ---
 from celery.signals import after_setup_logger, after_setup_task_logger, task_postrun, task_prerun
 
+import app.tasks.archive  # noqa: F401
 import app.tasks.finalize  # noqa: F401
 import app.tasks.image_ops  # noqa: F401
 import app.tasks.ml_ops  # noqa: F401

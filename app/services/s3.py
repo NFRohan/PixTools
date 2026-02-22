@@ -5,6 +5,7 @@ import logging
 import uuid
 
 import boto3
+from botocore.exceptions import ClientError
 from PIL import Image
 
 from app.config import settings
@@ -59,6 +60,12 @@ def _setup_lifecycle_policy(client):
                         "Status": "Enabled",
                         "Expiration": {"Days": settings.s3_retention_days},
                     },
+                    {
+                        "ID": "ExpireArchives",
+                        "Filter": {"Prefix": "archives/"},
+                        "Status": "Enabled",
+                        "Expiration": {"Days": settings.s3_retention_days},
+                    },
                 ]
             },
         )
@@ -91,6 +98,15 @@ def download_raw(s3_key: str) -> Image.Image:
     )
     image_bytes = response["Body"].read()
     return Image.open(io.BytesIO(image_bytes))
+
+
+def download_object_bytes(s3_key: str) -> bytes:
+    """Download object bytes from S3 for arbitrary key."""
+    response = _get_client().get_object(
+        Bucket=settings.aws_s3_bucket,
+        Key=s3_key,
+    )
+    return response["Body"].read()
 
 
 def upload_processed(
@@ -126,6 +142,36 @@ def upload_processed(
     )
     logger.info("Uploaded processed image: %s", key)
     return key
+
+
+def get_archive_key(job_id: str) -> str:
+    """Deterministic S3 key for a job's ZIP bundle."""
+    return f"archives/{job_id}/bundle.zip"
+
+
+def upload_archive_bytes(archive_bytes: bytes, job_id: str) -> str:
+    """Upload ZIP archive bytes and return archive key."""
+    key = get_archive_key(job_id)
+    _get_client().put_object(
+        Bucket=settings.aws_s3_bucket,
+        Key=key,
+        Body=archive_bytes,
+        ContentType="application/zip",
+    )
+    logger.info("Uploaded archive: %s", key)
+    return key
+
+
+def object_exists(s3_key: str) -> bool:
+    """Return True if S3 key exists."""
+    try:
+        _get_client().head_object(Bucket=settings.aws_s3_bucket, Key=s3_key)
+        return True
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code")
+        if error_code in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise
 
 
 def generate_presigned_url(s3_key: str, download_filename: str | None = None) -> str:

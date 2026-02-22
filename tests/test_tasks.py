@@ -45,7 +45,8 @@ def test_finalize_job_logic(db_session):
 
     with patch("app.tasks.finalize.Session") as mock_session_cls, \
          patch("app.tasks.finalize.generate_presigned_url", return_value="http://presigned.url"), \
-         patch("app.tasks.finalize.notify_job_update"):
+         patch("app.tasks.finalize.notify_job_update"), \
+         patch("app.tasks.finalize.celery_app.signature") as mock_signature:
 
         mock_session = MagicMock()
         mock_session_cls.return_value.__enter__.return_value = mock_session
@@ -56,6 +57,10 @@ def test_finalize_job_logic(db_session):
         mock_job.status = JobStatus.PENDING
         mock_session.get.return_value = mock_job
 
+        # Mock archive dispatch signature
+        mock_sig = MagicMock()
+        mock_signature.return_value = mock_sig
+
         # Manual run of the task
         from app.tasks.finalize import finalize_job
         res = finalize_job(results, job_id)
@@ -64,3 +69,23 @@ def test_finalize_job_logic(db_session):
         assert "webp" in res["result_urls"]
         assert mock_job.status == JobStatus.COMPLETED
         mock_session.commit.assert_called_once()
+        mock_signature.assert_called_once()
+        mock_sig.apply_async.assert_called_once()
+
+
+def test_bundle_results_logic():
+    """Test ZIP bundling task logic without real S3."""
+    result_keys = {
+        "webp": "processed/job/webp_abc.webp",
+        "png": "processed/job/png_xyz.png",
+    }
+
+    with patch("app.tasks.archive.s3.download_object_bytes", return_value=b"file-bytes") as mock_dl, \
+         patch("app.tasks.archive.s3.upload_archive_bytes", return_value="archives/job/bundle.zip") as mock_ul:
+        from app.tasks.archive import bundle_results
+
+        archive_key = bundle_results("job-123", result_keys, "sample.png")
+
+        assert archive_key == "archives/job/bundle.zip"
+        assert mock_dl.call_count == 2
+        mock_ul.assert_called_once()

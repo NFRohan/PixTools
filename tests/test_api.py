@@ -3,6 +3,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app.models import Job, JobStatus
 
 
 @pytest.mark.asyncio
@@ -110,3 +111,36 @@ async def test_create_job_rejects_quality_for_png(client):
     response = await client.post("/api/process", files=files, data=data)
     assert response.status_code == 422
     assert "only supported for jpg/webp" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_job_includes_archive_url(client, db_session, mocker):
+    """Archive URL should be present when archive key exists in S3."""
+    job_id = uuid.uuid4()
+    db_session.add(
+        Job(
+            id=job_id,
+            status=JobStatus.COMPLETED,
+            operations=["webp"],
+            result_urls={},
+            result_keys={"webp": "processed/job/webp_abc.webp"},
+            webhook_url="",
+            s3_raw_key="raw/job/input.png",
+            original_filename="photo.png",
+            retry_count=0,
+        )
+    )
+    await db_session.commit()
+
+    mocker.patch("app.routers.jobs.s3.object_exists", return_value=True)
+    mock_presign = mocker.patch(
+        "app.routers.jobs.s3.generate_presigned_url",
+        side_effect=["http://result.webp", "http://bundle.zip"],
+    )
+
+    response = await client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["archive_url"] == "http://bundle.zip"
+    assert data["result_urls"]["webp"] == "http://result.webp"
+    assert mock_presign.call_count == 2

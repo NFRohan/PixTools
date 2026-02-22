@@ -114,7 +114,10 @@
         <section id="results-section" class="results-area hidden">
             <div class="results-header card-neo bg-white">
                 <h2>RESULTS</h2>
-                <button id="btn-process-another" class="btn-neo btn-secondary btn-small">PROCESS ANOTHER ↺</button>
+                <div class="results-actions">
+                    <a id="btn-download-all" href="#" class="btn-neo btn-secondary btn-small hidden" download>DOWNLOAD ALL (.ZIP)</a>
+                    <button id="btn-process-another" class="btn-neo btn-secondary btn-small">PROCESS ANOTHER -></button>
+                </div>
             </div>
             <!-- Sub-error banner if webhook failed but polling succeeded -->
             <div id="webhook-warning" class="error-toast hidden bg-yellow">
@@ -164,3 +167,4 @@
     <script src="/static/app.js"></script>
 </body>
 </html>
+

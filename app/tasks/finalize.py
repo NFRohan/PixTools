@@ -39,6 +39,8 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
     engine = _get_sync_engine()
     result_urls = {}
     webhook_url = ""
+    original_filename = None
+    job_found = False
 
     with Session(engine) as session:
         # Fetch the job to get the original filename
@@ -46,6 +48,7 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
         orig_name = "image"
         if job and job.original_filename:
             orig_name = job.original_filename.rsplit(".", 1)[0]
+            original_filename = job.original_filename
 
         # Generate presigned download URLs with correct disposition filename
         result_keys = {}
@@ -62,11 +65,24 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
 
         # Update job
         if job:
+            job_found = True
             job.status = status
             job.result_urls = result_urls
             job.result_keys = result_keys
             webhook_url = job.webhook_url
             session.commit()
+
+    if job_found and result_keys:
+        request_id = getattr(self.request, "headers", {}).get("X-Request-ID", "N/A")
+        celery_app.signature(
+            "app.tasks.archive.bundle_results",
+            kwargs={
+                "job_id": job_id,
+                "result_keys": result_keys,
+                "original_filename": original_filename,
+            },
+            headers={"X-Request-ID": request_id},
+        ).apply_async()
 
     # --- Fire Webhook (Non-blocking sync-over-async wrapper) ---
     if webhook_url:
