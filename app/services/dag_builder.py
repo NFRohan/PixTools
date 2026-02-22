@@ -18,7 +18,13 @@ OPERATION_TASK_MAP = {
 }
 
 
-def build_dag(job_id: str, s3_raw_key: str, operations: list[str], request_id: str = "N/A") -> None:
+def build_dag(
+    job_id: str,
+    s3_raw_key: str,
+    operations: list[str],
+    request_id: str = "N/A",
+    operation_params: dict[str, dict] | None = None,
+) -> None:
     """Build and dispatch a Celery Canvas DAG for the given operations.
 
     Structure:
@@ -30,14 +36,17 @@ def build_dag(job_id: str, s3_raw_key: str, operations: list[str], request_id: s
     # Every task in the DAG inherits the X-Request-ID for correlation
     headers = {"X-Request-ID": request_id}
 
+    op_params_map = operation_params or {}
+
     for op in operations:
         task_name = OPERATION_TASK_MAP.get(op)
         if task_name is None:
             logger.warning("Unknown operation '%s', skipping", op)
             continue
+        task_params = op_params_map.get(op, {})
         sig = celery_app.signature(
             task_name,
-            kwargs={"job_id": job_id, "s3_raw_key": s3_raw_key},
+            kwargs={"job_id": job_id, "s3_raw_key": s3_raw_key, "params": task_params},
             headers=headers
         )
         task_signatures.append(sig)

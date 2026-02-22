@@ -74,10 +74,12 @@ The compose file already injects local defaults for PostgreSQL, Redis, RabbitMQ,
 docker compose up -d --build
 ```
 
-### 3. Run Migrations
+The stack now includes a one-off `migrate` service that runs `alembic upgrade head` before `api` and workers start.
+
+### 3. Check Migration Logs
 
 ```bash
-docker compose exec api alembic upgrade head
+docker compose logs -f migrate
 ```
 
 ### 4. Open the App
@@ -85,6 +87,12 @@ docker compose exec api alembic upgrade head
 - UI: http://localhost:8000
 - OpenAPI: http://localhost:8000/docs
 - RabbitMQ UI: http://localhost:15672
+
+If you add a new migration later, run it explicitly:
+
+```bash
+docker compose run --rm migrate
+```
 
 ## API Quick Reference
 

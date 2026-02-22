@@ -67,3 +67,46 @@ async def test_create_job_invalid_ops(client):
     response = await client.post("/api/process", files=files, data=data)
     assert response.status_code == 422 # Use int to avoid status code attribute issues
     assert "Invalid operations" in response.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_create_job_with_params_and_webhook(client, mocker):
+    """Test optional operation_params and webhook_url passthrough."""
+    mock_dag = mocker.patch("app.routers.jobs.build_dag")
+    mocker.patch("app.routers.jobs.s3.upload_raw", return_value="raw/test.png")
+
+    files = {"file": ("test.png", b"fake image data", "image/png")}
+    data = {
+        "operations": json.dumps(["webp"]),
+        "operation_params": json.dumps({"webp": {"quality": 75, "resize": {"width": 640}}}),
+        "webhook_url": "https://example.com/webhook",
+    }
+
+    response = await client.post("/api/process", files=files, data=data)
+    assert response.status_code == 202
+    mock_dag.assert_called_once()
+    kwargs = mock_dag.call_args.kwargs
+    assert kwargs["operation_params"]["webp"]["quality"] == 75
+
+@pytest.mark.asyncio
+async def test_create_job_invalid_webhook_url(client):
+    """Test validation error for malformed webhook URL."""
+    files = {"file": ("test.png", b"data", "image/png")}
+    data = {
+        "operations": json.dumps(["webp"]),
+        "webhook_url": "ftp://invalid-endpoint",
+    }
+    response = await client.post("/api/process", files=files, data=data)
+    assert response.status_code == 422
+    assert "webhook_url" in response.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_create_job_rejects_quality_for_png(client):
+    """Quality should only be accepted for jpg/webp operations."""
+    files = {"file": ("test.png", b"data", "image/png")}
+    data = {
+        "operations": json.dumps(["png"]),
+        "operation_params": json.dumps({"png": {"quality": 90}}),
+    }
+    response = await client.post("/api/process", files=files, data=data)
+    assert response.status_code == 422
+    assert "only supported for jpg/webp" in response.json()["detail"]

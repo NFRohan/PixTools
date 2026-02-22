@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.config import settings
 from app.database import engine
 from app.logging_config import request_id_ctx, setup_logging
 from app.models import Base
@@ -22,13 +23,18 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     """Startup / shutdown lifecycle hook."""
-    # Create tables (dev only — Alembic handles this in prod)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables ensured")
+    # For sqlite local development, auto-create tables.
+    # For Postgres deployments, rely on Alembic migrations.
+    if settings.database_url.startswith("sqlite"):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables ensured (sqlite auto-create)")
+    else:
+        logger.info("Skipping metadata.create_all for non-sqlite database")
 
     # Ensure S3 bucket and lifecycle policies are set up
     from app.services.s3 import _get_client
+
     _get_client()
     logger.info("S3 bucket and lifecycle policies ensured")
     yield
@@ -52,7 +58,7 @@ def create_app() -> FastAPI:
 
     @application.middleware("http")
     async def request_id_middleware(request: Request, call_next):
-        """Extracts or generates X-Request-ID for log correlation."""
+        """Extract or generate X-Request-ID for log correlation."""
         rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         token = request_id_ctx.set(rid)
         try:

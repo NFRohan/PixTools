@@ -70,6 +70,29 @@
                     </div>
                     <!-- Inline error container -->
                     <div id="ops-error" class="error-toast hidden"></div>
+
+                    <div id="advanced-controls" class="advanced-controls hidden">
+                        <h4>Parameters</h4>
+
+                        <div id="quality-control" class="param-row hidden">
+                            <label for="quality-range">Quality</label>
+                            <input id="quality-range" type="range" min="1" max="100" value="80">
+                            <span id="quality-value" class="mono-text">80</span>
+                        </div>
+
+                        <div class="param-row">
+                            <label for="resize-width">Resize</label>
+                            <div class="resize-group">
+                                <input id="resize-width" type="number" min="1" step="1" placeholder="width">
+                                <input id="resize-height" type="number" min="1" step="1" placeholder="height">
+                            </div>
+                        </div>
+
+                        <div class="param-row">
+                            <label for="webhook-url">Webhook URL</label>
+                            <input id="webhook-url" type="url" placeholder="https://example.com/hook">
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Process Button States -->

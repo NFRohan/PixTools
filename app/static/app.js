@@ -16,6 +16,13 @@ const uploadError = document.getElementById('upload-error');
 
 const checkboxes = document.querySelectorAll('input[name="operation"]');
 const opsError = document.getElementById('ops-error');
+const advancedControls = document.getElementById('advanced-controls');
+const qualityControl = document.getElementById('quality-control');
+const qualityRange = document.getElementById('quality-range');
+const qualityValue = document.getElementById('quality-value');
+const resizeWidthInput = document.getElementById('resize-width');
+const resizeHeightInput = document.getElementById('resize-height');
+const webhookUrlInput = document.getElementById('webhook-url');
 
 const btnProcess = document.getElementById('btn-process');
 const processIndicator = document.getElementById('process-indicator');
@@ -55,9 +62,14 @@ const EXT_TO_FORMAT = {
 
 function init() {
     loadHistoryFromStorage();
+    updateAdvancedControls();
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+qualityRange?.addEventListener('input', () => {
+    qualityValue.textContent = qualityRange.value;
+});
 
 // --- Drag & Drop / File Selection ---
 
@@ -135,6 +147,12 @@ function resetUploadState() {
         cb.closest('.op-checkbox').classList.remove('disabled');
         cb.disabled = false;
     });
+    qualityRange.value = '80';
+    qualityValue.textContent = '80';
+    resizeWidthInput.value = '';
+    resizeHeightInput.value = '';
+    webhookUrlInput.value = '';
+    updateAdvancedControls();
     checkProcessReady();
 }
 
@@ -155,17 +173,65 @@ function updateOpsAvailability() {
             wrapper.classList.remove('disabled');
         }
     });
+    updateAdvancedControls();
+}
+
+function updateAdvancedControls() {
+    const selectedOps = getSelectedOperations();
+    const hasOps = selectedOps.length > 0;
+    const supportsQuality = selectedOps.some(op => op === 'jpg' || op === 'webp');
+
+    if (hasOps) {
+        advancedControls.classList.remove('hidden');
+    } else {
+        advancedControls.classList.add('hidden');
+    }
+
+    if (supportsQuality) {
+        qualityControl.classList.remove('hidden');
+    } else {
+        qualityControl.classList.add('hidden');
+    }
 }
 
 checkboxes.forEach(cb => {
     cb.addEventListener('change', () => {
         hideError(opsError);
+        updateAdvancedControls();
         checkProcessReady();
     });
 });
 
 function getSelectedOperations() {
     return Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+}
+
+function getOperationParams(selectedOps) {
+    const params = {};
+    const widthRaw = resizeWidthInput.value.trim();
+    const heightRaw = resizeHeightInput.value.trim();
+    const hasResize = widthRaw !== '' || heightRaw !== '';
+
+    selectedOps.forEach(op => {
+        const opParams = {};
+
+        if ((op === 'jpg' || op === 'webp') && !qualityControl.classList.contains('hidden')) {
+            opParams.quality = Number(qualityRange.value);
+        }
+
+        if (hasResize) {
+            const resize = {};
+            if (widthRaw !== '') resize.width = Number(widthRaw);
+            if (heightRaw !== '') resize.height = Number(heightRaw);
+            opParams.resize = resize;
+        }
+
+        if (Object.keys(opParams).length > 0) {
+            params[op] = opParams;
+        }
+    });
+
+    return params;
 }
 
 function checkProcessReady() {
@@ -179,6 +245,8 @@ function checkProcessReady() {
 btnProcess.addEventListener('click', async () => {
     const ops = getSelectedOperations();
     if (!currentFile || ops.length === 0) return;
+    const opParams = getOperationParams(ops);
+    const webhookUrl = webhookUrlInput.value.trim();
 
     // Start processing state
     btnProcess.classList.add('hidden');
@@ -196,6 +264,12 @@ btnProcess.addEventListener('click', async () => {
     formData.append('file', currentFile);
     formData.append('operations', JSON.stringify(ops));
     formData.append('idempotency_key', idempotencyKey);
+    if (Object.keys(opParams).length > 0) {
+        formData.append('operation_params', JSON.stringify(opParams));
+    }
+    if (webhookUrl) {
+        formData.append('webhook_url', webhookUrl);
+    }
 
     try {
         const response = await fetch('/api/process', {

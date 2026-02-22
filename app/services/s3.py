@@ -93,19 +93,25 @@ def download_raw(s3_key: str) -> Image.Image:
     return Image.open(io.BytesIO(image_bytes))
 
 
-def upload_processed(image: Image.Image, job_id: str, operation: str, fmt: str) -> str:
+def upload_processed(
+    image: Image.Image,
+    job_id: str,
+    operation: str,
+    fmt: str,
+    save_kwargs: dict | None = None,
+) -> str:
     """Save a processed PIL Image to S3. Returns the S3 key."""
     buffer = io.BytesIO()
-    save_kwargs = {}
+    save_opts = dict(save_kwargs or {})
     if fmt.upper() == "JPEG":
-        save_kwargs["quality"] = 85
+        save_opts.setdefault("quality", 85)
         image = image.convert("RGB")  # strip alpha for JPEG
     elif fmt.upper() == "WEBP":
-        save_kwargs["quality"] = 80
+        save_opts.setdefault("quality", 80)
     elif fmt.upper() == "PNG":
-        save_kwargs["optimize"] = True
+        save_opts.setdefault("optimize", True)
 
-    image.save(buffer, format=fmt.upper(), **save_kwargs)
+    image.save(buffer, format=fmt.upper(), **save_opts)
     buffer.seek(0)
 
     ext = fmt.lower()

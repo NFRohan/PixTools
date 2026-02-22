@@ -1,4 +1,3 @@
-from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,22 +8,20 @@ from app.tasks.image_ops import convert_webp
 
 
 @pytest.fixture
-def mock_image_bytes():
-    """Generates valid PNG bytes for testing."""
-    img = Image.new("RGB", (10, 10), color="red")
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+def mock_image():
+    """Generates a valid PIL image for testing."""
+    return Image.new("RGB", (10, 10), color="red")
 
-def test_convert_webp_logic(mock_image_bytes):
+def test_convert_webp_logic(mock_image):
     """Test the image conversion logic without real S3."""
     job_id = "test-job"
     s3_key = "raw/test.png"
+    params = {"quality": 72, "resize": {"width": 8}}
 
-    with patch("app.tasks.image_ops.download_raw", return_value=mock_image_bytes) as mock_dl, \
+    with patch("app.tasks.image_ops.download_raw", return_value=mock_image) as mock_dl, \
          patch("app.tasks.image_ops.upload_processed", return_value="processed/test.webp") as mock_ul:
 
-        result = convert_webp(job_id, s3_key)
+        result = convert_webp(job_id, s3_key, params)
 
         assert result == "processed/test.webp"
         mock_dl.assert_called_once()
@@ -33,6 +30,7 @@ def test_convert_webp_logic(mock_image_bytes):
         # Verify it was saved as WEBP
         args, kwargs = mock_ul.call_args
         assert args[3] == "WEBP" # fmt argument
+        assert kwargs["save_kwargs"]["quality"] == 72
 
 def test_finalize_job_logic(db_session):
     """Test the job finalization logic and DB updates."""

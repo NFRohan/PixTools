@@ -38,6 +38,7 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
     status = JobStatus.COMPLETED
     engine = _get_sync_engine()
     result_urls = {}
+    webhook_url = ""
 
     with Session(engine) as session:
         # Fetch the job to get the original filename

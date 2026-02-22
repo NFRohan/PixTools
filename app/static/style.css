@@ -271,6 +271,44 @@ h4,
     font-weight: 600;
 }
 
+.advanced-controls {
+    margin-top: var(--space-lg);
+    border-top: var(--border-thin);
+    padding-top: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.advanced-controls h4 {
+    margin-bottom: var(--space-sm);
+}
+
+.param-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.param-row input[type="range"] {
+    width: 100%;
+}
+
+.param-row input[type="number"],
+.param-row input[type="url"] {
+    width: 100%;
+    border: var(--border-thin);
+    padding: 0.5rem 0.6rem;
+    font-family: var(--font-heading);
+    font-size: 0.9rem;
+}
+
+.resize-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm);
+}
+
 /* Buttons */
 .btn-neo {
     display: block;

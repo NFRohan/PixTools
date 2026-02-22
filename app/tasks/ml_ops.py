@@ -7,6 +7,7 @@ import torch
 from celery.signals import worker_init
 from PIL import Image
 
+from app.config import settings
 from app.ml.dncnn import DnCNN
 from app.services.s3 import download_raw, upload_processed
 from app.tasks.celery_app import celery_app
@@ -14,6 +15,39 @@ from app.tasks.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _model = None
+
+
+def _apply_resize_if_requested(image: Image.Image, params: dict | None) -> Image.Image:
+    """Optional resize before denoising."""
+    if not params:
+        return image
+
+    resize = params.get("resize")
+    if not isinstance(resize, dict):
+        return image
+
+    width = resize.get("width")
+    height = resize.get("height")
+    if width is None and height is None:
+        return image
+
+    if width is not None:
+        width = min(int(width), settings.max_image_width)
+        if width <= 0:
+            raise ValueError("resize.width must be > 0")
+    if height is not None:
+        height = min(int(height), settings.max_image_height)
+        if height <= 0:
+            raise ValueError("resize.height must be > 0")
+
+    src_w, src_h = image.size
+    if width is None:
+        width = max(1, int((height / src_h) * src_w))
+    elif height is None:
+        height = max(1, int((width / src_w) * src_h))
+
+    return image.resize((width, height), Image.Resampling.LANCZOS)
+
 
 @worker_init.connect
 def load_model(**kwargs):
@@ -31,7 +65,7 @@ def load_model(**kwargs):
 
 
 @celery_app.task(name="app.tasks.ml_ops.denoise", bind=True, max_retries=3)
-def denoise(self, job_id: str, s3_raw_key: str) -> str:
+def denoise(self, job_id: str, s3_raw_key: str, params: dict | None = None) -> str:
     """Run DnCNN inference to denoise an S3-hosted image."""
     global _model
     if _model is None:
@@ -43,6 +77,7 @@ def denoise(self, job_id: str, s3_raw_key: str) -> str:
 
         # 1. Download image
         image = download_raw(s3_raw_key).convert("RGB")
+        image = _apply_resize_if_requested(image, params)
 
         # 2. Preprocess: PIL Image -> numpy [H, W, 3] -> tensor [1, 3, H, W] in [0, 1]
         img_np = np.array(image, dtype=np.float32) / 255.0
