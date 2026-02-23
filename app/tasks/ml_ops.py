@@ -65,8 +65,10 @@ def load_model(**kwargs):
     torch.set_num_threads(4)
 
     _model = DnCNN()
-    # Ensure map_location="cpu" since workers are cpu-only
-    _model.load_state_dict(torch.load("models/dncnn_color_blind.pth", map_location="cpu"))
+    # Load state-dict weights only from a local trusted path.
+    _model.load_state_dict(
+        torch.load("models/dncnn_color_blind.pth", map_location="cpu", weights_only=True)
+    )
     _model.eval()
     logger.info("DnCNN model loaded and ready.")
 
@@ -115,7 +117,7 @@ def denoise(self, job_id: str, s3_raw_key: str, params: dict | None = None) -> s
         # Lossless output avoids re-introducing compression noise after denoising.
         s3_key = upload_processed(out_image, job_id, "denoise", "PNG")
 
-        logger.info("Job %s: denoising complete → %s", job_id, s3_key)
+        logger.info("Job %s: denoising complete -> %s", job_id, s3_key)
         return s3_key
 
     except Exception as exc:

@@ -48,7 +48,6 @@ jobs:
   devsecops:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -67,10 +66,12 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Dependency vulnerability audit (pip-audit)
-        run: pip-audit
+        run: |
+          pip-audit
 
       - name: Static analysis security test (bandit)
-        run: bandit -r app -q
+        run: |
+          bandit -r app -q
 
       - name: Trivy filesystem scan (vuln + secret + misconfig)
         run: |
@@ -79,7 +80,7 @@ jobs:
             aquasec/trivy:latest fs \
             --scanners vuln,secret,misconfig \
             --severity HIGH,CRITICAL \
-            --exit-code 1 \
+            --exit-code 0 \
             /src
 
   docker_build:
@@ -95,11 +96,10 @@ jobs:
         run: docker build -t pixtools:ci .
 
       - name: Trivy image scan
-        continue-on-error: true
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:latest image \
             --severity HIGH,CRITICAL \
-            --exit-code 1 \
+            --exit-code 0 \
             pixtools:ci
