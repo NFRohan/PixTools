@@ -75,15 +75,20 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
     if job_found and result_keys:
         headers = getattr(self.request, "headers", None) or {}
         request_id = headers.get("X-Request-ID", "N/A")
-        celery_app.signature(
-            "app.tasks.archive.bundle_results",
-            kwargs={
-                "job_id": job_id,
-                "result_keys": result_keys,
-                "original_filename": original_filename,
-            },
-            headers={"X-Request-ID": request_id},
-        ).apply_async()
+        try:
+            celery_app.signature(
+                "app.tasks.archive.bundle_results",
+                kwargs={
+                    "job_id": job_id,
+                    "result_keys": result_keys,
+                    "original_filename": original_filename,
+                },
+                headers={"X-Request-ID": request_id},
+            ).apply_async()
+        except Exception:
+            # ZIP bundling is an enhancement; job completion should not be blocked
+            # if dispatch fails due transient broker/backend issues.
+            logger.exception("Job %s: failed to dispatch archive bundling task", job_id)
 
     # --- Fire Webhook (Non-blocking sync-over-async wrapper) ---
     webhook_failed = False
