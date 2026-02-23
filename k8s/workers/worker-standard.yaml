@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pixtools-worker-standard
+  namespace: pixtools
+  labels:
+    app: pixtools-worker-standard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pixtools-worker-standard
+  template:
+    metadata:
+      labels:
+        app: pixtools-worker-standard
+    spec:
+      containers:
+        - name: worker-standard
+          image: __WORKER_IMAGE__
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - app.tasks.celery_app
+            - worker
+            - -Q
+            - default_queue
+            - --concurrency=5
+            - --loglevel=info
+          envFrom:
+            - configMapRef:
+                name: pixtools-config
+            - secretRef:
+                name: pixtools-runtime
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "384Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+
