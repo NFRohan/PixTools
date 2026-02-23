@@ -1,0 +1,100 @@
+name: CD-Prod
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 60
+
+    env:
+      AWS_REGION: us-east-1
+      ENVIRONMENT: prod
+      ECR_API_REPO: pixtools-api
+      ECR_WORKER_REPO: pixtools-worker
+      MANIFEST_PREFIX: manifests/prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Discover AWS account ID
+        id: aws
+        run: echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API/worker images
+        id: image
+        env:
+          ACCOUNT_ID: ${{ steps.aws.outputs.account_id }}
+          SHA_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          API_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_API_REPO}"
+          WORKER_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_WORKER_REPO}"
+
+          docker build -t "${API_URI}:${SHA_TAG}" .
+          docker tag "${API_URI}:${SHA_TAG}" "${WORKER_URI}:${SHA_TAG}"
+
+          docker push "${API_URI}:${SHA_TAG}"
+          docker push "${WORKER_URI}:${SHA_TAG}"
+
+          API_DIGEST="$(aws ecr describe-images --repository-name "${ECR_API_REPO}" --image-ids imageTag="${SHA_TAG}" --query 'imageDetails[0].imageDigest' --output text)"
+          WORKER_DIGEST="$(aws ecr describe-images --repository-name "${ECR_WORKER_REPO}" --image-ids imageTag="${SHA_TAG}" --query 'imageDetails[0].imageDigest' --output text)"
+
+          echo "api_image=${API_URI}@${API_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "worker_image=${WORKER_URI}@${WORKER_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Render Kubernetes manifests
+        env:
+          API_IMAGE: ${{ steps.image.outputs.api_image }}
+          WORKER_IMAGE: ${{ steps.image.outputs.worker_image }}
+          ALLOWED_INGRESS_CIDRS: ${{ secrets.ALLOWED_INGRESS_CIDRS }}
+          ALB_SECURITY_GROUP_ID: ${{ secrets.ALB_SECURITY_GROUP_ID }}
+        run: |
+          chmod +x scripts/deploy/render-manifests.sh
+          scripts/deploy/render-manifests.sh build/manifests
+
+      - name: Upload rendered manifests to S3
+        env:
+          MANIFEST_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
+        run: |
+          aws s3 sync build/manifests "s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}" --delete
+
+      - name: Resolve K3s instance ID
+        id: ec2
+        run: |
+          INSTANCE_ID="$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=pixtools-prod-k3s" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)"
+          if [ -z "${INSTANCE_ID}" ] || [ "${INSTANCE_ID}" = "None" ]; then
+            echo "No running K3s instance found." >&2
+            exit 1
+          fi
+          echo "instance_id=${INSTANCE_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy manifests via SSM command
+        env:
+          MANIFEST_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
+        run: |
+          chmod +x scripts/deploy/run-on-ssm.sh
+          scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "aws s3 sync s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX} /opt/pixtools/manifests --delete && find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -n 1 kubectl apply -f"
+
+      - name: Post-deploy pod status
+        run: |
+          scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "kubectl -n pixtools get pods -o wide"
