@@ -1,4 +1,5 @@
 """Celery application configuration, queue routing, and DLQ setup."""
+# ruff: noqa: I001
 
 from celery import Celery
 from celery.schedules import crontab
@@ -82,15 +83,15 @@ celery_app.conf.task_default_retry_delay = 5  # 5s between retries
 
 # --- Import task modules so they register with the app ---
 # --- Logging & Correlation ID propagation ---
-from celery.signals import after_setup_logger, after_setup_task_logger, task_postrun, task_prerun
+from celery.signals import after_setup_logger, after_setup_task_logger, task_postrun, task_prerun  # noqa: E402
 
-import app.tasks.archive  # noqa: F401
-import app.tasks.finalize  # noqa: F401
-import app.tasks.image_ops  # noqa: F401
-import app.tasks.maintenance  # noqa: F401
-import app.tasks.metadata  # noqa: F401
-import app.tasks.ml_ops  # noqa: F401
-from app.logging_config import job_id_ctx, request_id_ctx, setup_logging
+import app.tasks.archive  # noqa: E402,F401
+import app.tasks.finalize  # noqa: E402,F401
+import app.tasks.image_ops  # noqa: E402,F401
+import app.tasks.maintenance  # noqa: E402,F401
+import app.tasks.metadata  # noqa: E402,F401
+import app.tasks.ml_ops  # noqa: E402,F401
+from app.logging_config import job_id_ctx, request_id_ctx, setup_logging  # noqa: E402
 
 
 @after_setup_logger.connect

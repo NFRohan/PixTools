@@ -6,7 +6,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,7 +106,10 @@ def _parse_operation_params(raw_params: str | None, ops: list[OperationType]) ->
             if op_name not in RESIZE_SUPPORTED_OPS:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"operation_params['{op_name}'].resize is only supported for jpg/png/webp/avif/denoise",
+                    detail=(
+                        f"operation_params['{op_name}'].resize is only supported for "
+                        "jpg/png/webp/avif/denoise"
+                    ),
                 )
             if not isinstance(resize, dict):
                 raise HTTPException(
@@ -188,7 +191,10 @@ async def create_job(
     if file.content_type not in settings.accepted_mime_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type: {file.content_type}. Accepted: {settings.accepted_mime_types}",
+            detail=(
+                f"Unsupported file type: {file.content_type}. "
+                f"Accepted: {settings.accepted_mime_types}"
+            ),
         )
 
     try:
@@ -209,14 +215,21 @@ async def create_job(
     op_params = _parse_operation_params(operation_params, ops)
     validated_webhook_url = _validate_webhook_url(webhook_url)
 
-    source_ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else None
+    source_ext = (
+        file.filename.rsplit(".", 1)[-1].lower()
+        if file.filename and "." in file.filename
+        else None
+    )
     source_format = EXT_TO_FORMAT.get(source_ext) if source_ext else None
     conversion_ops = [op for op in ops if op not in {OperationType.DENOISE, OperationType.METADATA}]
     for op in conversion_ops:
         if op.value == source_format:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Cannot convert {source_ext} to {op.value} - source and target formats are the same",
+                detail=(
+                    f"Cannot convert {source_ext} to {op.value} - "
+                    "source and target formats are the same"
+                ),
             )
 
     if idempotency_key:
@@ -292,7 +305,11 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     archive_url = None
     if job.status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WEBHOOK_FAILED] and job.result_keys:
         fresh_urls = {}
-        original_base = job.original_filename.rsplit(".", 1)[0] if job.original_filename else "image"
+        original_base = (
+            job.original_filename.rsplit(".", 1)[0]
+            if job.original_filename
+            else "image"
+        )
 
         for op, s3_key in job.result_keys.items():
             ext = s3_key.split(".")[-1]

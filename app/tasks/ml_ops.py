@@ -42,9 +42,16 @@ def _apply_resize_if_requested(image: Image.Image, params: dict | None) -> Image
 
     src_w, src_h = image.size
     if width is None:
+        if height is None:
+            return image
         width = max(1, int((height / src_h) * src_w))
     elif height is None:
+        if width is None:
+            return image
         height = max(1, int((width / src_w) * src_h))
+
+    if width is None or height is None:
+        return image
 
     return image.resize((width, height), Image.Resampling.LANCZOS)
 
@@ -76,7 +83,11 @@ def denoise(self, job_id: str, s3_raw_key: str, params: dict | None = None) -> s
         logger.info("Job %s: starting DnCNN denoising", job_id)
 
         # 1. Download image
-        image = ImageOps.exif_transpose(download_raw(s3_raw_key)).convert("RGB")
+        image = download_raw(s3_raw_key)
+        transposed = ImageOps.exif_transpose(image)
+        if transposed is not None:
+            image = transposed
+        image = image.convert("RGB")
         image = _apply_resize_if_requested(image, params)
 
         # 2. Preprocess: PIL Image -> numpy [H, W, 3] -> tensor [1, 3, H, W] in [0, 1]
@@ -100,12 +111,12 @@ def denoise(self, job_id: str, s3_raw_key: str, params: dict | None = None) -> s
 
         out_image = Image.fromarray(out_img_np)
 
-        # 5. Upload to S3
-        # Denoised image benefits from lossless format to prevent reintroducing JPEG compression noise
+        # 5. Upload to S3.
+        # Lossless output avoids re-introducing compression noise after denoising.
         s3_key = upload_processed(out_image, job_id, "denoise", "PNG")
 
         logger.info("Job %s: denoising complete → %s", job_id, s3_key)
         return s3_key
 
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc

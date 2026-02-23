@@ -26,7 +26,12 @@ async def deliver_webhook(webhook_url: str, payload: dict[str, Any]):
 
     logger.info("Webhook delivered successfully")
 
-async def notify_job_update(webhook_url: str, job_id: str, status: str, result_urls: dict[str, str]) -> bool:
+async def notify_job_update(
+    webhook_url: str,
+    job_id: str,
+    status: str,
+    result_urls: dict[str, str],
+) -> bool:
     """Format and send a webhook payload.
 
     Returns True when delivered (or when no URL is configured), False on failure.

@@ -36,4 +36,4 @@ def bundle_results(
         logger.info("Job %s: archive created -> %s", job_id, archive_key)
         return archive_key
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc

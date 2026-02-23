@@ -18,8 +18,13 @@ def test_convert_webp_logic(mock_image):
     s3_key = "raw/test.png"
     params = {"quality": 72, "resize": {"width": 8}}
 
-    with patch("app.tasks.image_ops.download_raw", return_value=mock_image) as mock_dl, \
-         patch("app.tasks.image_ops.upload_processed", return_value="processed/test.webp") as mock_ul:
+    with (
+        patch("app.tasks.image_ops.download_raw", return_value=mock_image) as mock_dl,
+        patch(
+            "app.tasks.image_ops.upload_processed",
+            return_value="processed/test.webp",
+        ) as mock_ul,
+    ):
 
         result = convert_webp(job_id, s3_key, params)
 
@@ -43,10 +48,15 @@ def test_finalize_job_logic(db_session):
     # Note: finalize_job uses its own internal sync session.
     # For this test, we'll patch the Session in finalize.py
 
-    with patch("app.tasks.finalize.Session") as mock_session_cls, \
-         patch("app.tasks.finalize.generate_presigned_url", return_value="http://presigned.url"), \
-         patch("app.tasks.finalize.notify_job_update", new=AsyncMock(return_value=True)), \
-         patch("app.tasks.finalize.celery_app.signature") as mock_signature:
+    with (
+        patch("app.tasks.finalize.Session") as mock_session_cls,
+        patch(
+            "app.tasks.finalize.generate_presigned_url",
+            return_value="http://presigned.url",
+        ),
+        patch("app.tasks.finalize.notify_job_update", new=AsyncMock(return_value=True)),
+        patch("app.tasks.finalize.celery_app.signature") as mock_signature,
+    ):
 
         mock_session = MagicMock()
         mock_session_cls.return_value.__enter__.return_value = mock_session
@@ -75,9 +85,14 @@ def test_finalize_job_logic(db_session):
 
 def test_finalize_job_marks_webhook_failed():
     """Finalize should persist COMPLETED_WEBHOOK_FAILED when webhook fails."""
-    with patch("app.tasks.finalize.Session") as mock_session_cls, \
-         patch("app.tasks.finalize.generate_presigned_url", return_value="http://presigned.url"), \
-         patch("app.tasks.finalize.notify_job_update", new=AsyncMock(return_value=False)):
+    with (
+        patch("app.tasks.finalize.Session") as mock_session_cls,
+        patch(
+            "app.tasks.finalize.generate_presigned_url",
+            return_value="http://presigned.url",
+        ),
+        patch("app.tasks.finalize.notify_job_update", new=AsyncMock(return_value=False)),
+    ):
         from app.tasks.finalize import finalize_job
 
         mock_session_1 = MagicMock()
@@ -106,8 +121,13 @@ def test_bundle_results_logic():
         "png": "processed/job/png_xyz.png",
     }
 
-    with patch("app.tasks.archive.s3.download_object_bytes", return_value=b"file-bytes") as mock_dl, \
-         patch("app.tasks.archive.s3.upload_archive_bytes", return_value="archives/job/bundle.zip") as mock_ul:
+    with (
+        patch("app.tasks.archive.s3.download_object_bytes", return_value=b"file-bytes") as mock_dl,
+        patch(
+            "app.tasks.archive.s3.upload_archive_bytes",
+            return_value="archives/job/bundle.zip",
+        ) as mock_ul,
+    ):
         from app.tasks.archive import bundle_results
 
         archive_key = bundle_results("job-123", result_keys, "sample.png")
@@ -119,8 +139,10 @@ def test_bundle_results_logic():
 
 def test_extract_metadata_logic():
     """EXIF task should persist parsed metadata to the job row."""
-    with patch("app.tasks.metadata.download_raw") as mock_download, \
-         patch("app.tasks.metadata.Session") as mock_session_cls:
+    with (
+        patch("app.tasks.metadata.download_raw") as mock_download,
+        patch("app.tasks.metadata.Session") as mock_session_cls,
+    ):
         from app.tasks.metadata import extract_metadata
 
         mock_img = MagicMock()
@@ -141,8 +163,10 @@ def test_extract_metadata_logic():
 
 def test_extract_metadata_mark_completed_logic():
     """Metadata-only completion should mark job completed."""
-    with patch("app.tasks.metadata.download_raw") as mock_download, \
-         patch("app.tasks.metadata.Session") as mock_session_cls:
+    with (
+        patch("app.tasks.metadata.download_raw") as mock_download,
+        patch("app.tasks.metadata.Session") as mock_session_cls,
+    ):
         from app.tasks.metadata import extract_metadata
 
         mock_img = MagicMock()

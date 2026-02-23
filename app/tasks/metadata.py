@@ -1,6 +1,7 @@
 """EXIF metadata extraction task."""
 
 import logging
+from contextlib import suppress
 
 from PIL import ExifTags
 from sqlalchemy import create_engine
@@ -49,9 +50,12 @@ def _format_exposure(value) -> str | None:
     if value is None:
         return None
     try:
-        if hasattr(value, "numerator") and hasattr(value, "denominator"):
-            if value.denominator:
-                return f"{value.numerator}/{value.denominator}s"
+        if (
+            hasattr(value, "numerator")
+            and hasattr(value, "denominator")
+            and value.denominator
+        ):
+            return f"{value.numerator}/{value.denominator}s"
         if isinstance(value, tuple) and len(value) == 2 and value[1]:
             return f"{value[0]}/{value[1]}s"
         return f"{float(value):.4f}s"
@@ -116,13 +120,12 @@ def _extract_exif_metadata(s3_raw_key: str) -> dict:
         metadata["aperture"] = f"f/{round(f_number, 2)}"
 
     iso_value = exif_map.get("ISOSpeedRatings") or exif_map.get("PhotographicSensitivity")
-    if isinstance(iso_value, (tuple, list)) and iso_value:
-        iso_value = iso_value[0]
-    if iso_value is not None:
-        try:
-            metadata["iso"] = int(iso_value)
-        except Exception:
-            pass
+    iso_scalar = iso_value
+    if isinstance(iso_scalar, (tuple, list)):
+        iso_scalar = iso_scalar[0] if iso_scalar else None
+    if iso_scalar is not None:
+        with suppress(Exception):
+            metadata["iso"] = int(iso_scalar)
 
     gps_info = None
     # PIL may expose GPS in a dedicated IFD even when "GPSInfo" is a numeric pointer.
@@ -174,7 +177,12 @@ def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = 
                             job.status = JobStatus.COMPLETED_WEBHOOK_FAILED
                             session.commit()
             except Exception as exc:
-                logger.error("Failed metadata-only webhook for job %s: %s", job_id, exc, exc_info=True)
+                logger.error(
+                    "Failed metadata-only webhook for job %s: %s",
+                    job_id,
+                    exc,
+                    exc_info=True,
+                )
                 with Session(engine) as session:
                     job = session.get(Job, job_id)
                     if job:
@@ -184,4 +192,4 @@ def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = 
         logger.info("Job %s: EXIF metadata extracted (%d fields)", job_id, len(metadata))
         return metadata
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc

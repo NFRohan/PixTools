@@ -89,9 +89,12 @@ def finalize_job(self, results: list[str], job_id: str) -> dict:
     webhook_failed = False
     if webhook_url:
         import asyncio
+
         try:
-            # Celery workers are synchronous, so we run the async webhook delivery using a new event loop
-            delivered = asyncio.run(notify_job_update(webhook_url, job_id, status.value, result_urls))
+            # Celery workers are synchronous, so run async webhook delivery in a fresh loop.
+            delivered = asyncio.run(
+                notify_job_update(webhook_url, job_id, status.value, result_urls)
+            )
             if not delivered:
                 webhook_failed = True
         except Exception as e:

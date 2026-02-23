@@ -1,12 +1,11 @@
 import logging
 
+import pillow_avif  # noqa: F401
 from PIL import Image, ImageOps
 
 from app.config import settings
 from app.services.s3 import download_raw, upload_processed
 from app.tasks.celery_app import celery_app
-
-import pillow_avif
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +55,16 @@ def _resize_image(
     if width is None and height is None:
         return image
     if width is None:
+        if height is None:
+            return image
         width = max(1, int((height / src_h) * src_w))
     elif height is None:
+        if width is None:
+            return image
         height = max(1, int((width / src_w) * src_h))
+
+    if width is None or height is None:
+        return image
 
     return image.resize((width, height), Image.Resampling.LANCZOS)
 
@@ -85,7 +91,9 @@ def _convert(
     logger.info("Job %s: starting %s conversion", job_id, operation_name)
     image = download_raw(s3_raw_key)
     # Respect camera orientation so portrait images are not exported rotated.
-    image = ImageOps.exif_transpose(image)
+    transposed = ImageOps.exif_transpose(image)
+    if transposed is not None:
+        image = transposed
     image = _resize_image(image, _parse_resize(params))
 
     save_kwargs: dict = {}
@@ -110,7 +118,7 @@ def convert_jpg(self, job_id: str, s3_raw_key: str, params: dict | None = None) 
     try:
         return _convert(job_id, s3_raw_key, "JPEG", "jpg", params=params)
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
 
 
 @celery_app.task(name="app.tasks.image_ops.convert_png", bind=True, max_retries=3)
@@ -119,7 +127,7 @@ def convert_png(self, job_id: str, s3_raw_key: str, params: dict | None = None) 
     try:
         return _convert(job_id, s3_raw_key, "PNG", "png", params=params)
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
 
 
 @celery_app.task(name="app.tasks.image_ops.convert_webp", bind=True, max_retries=3)
@@ -128,7 +136,7 @@ def convert_webp(self, job_id: str, s3_raw_key: str, params: dict | None = None)
     try:
         return _convert(job_id, s3_raw_key, "WEBP", "webp", params=params)
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
 
 
 @celery_app.task(name="app.tasks.image_ops.convert_avif", bind=True, max_retries=3)
@@ -137,4 +145,4 @@ def convert_avif(self, job_id: str, s3_raw_key: str, params: dict | None = None)
     try:
         return _convert(job_id, s3_raw_key, "AVIF", "avif", params=params)
     except Exception as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc

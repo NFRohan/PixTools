@@ -33,7 +33,7 @@ def _get_client():
         except Exception:
             _s3_client.create_bucket(Bucket=settings.aws_s3_bucket)
             logger.info("Created S3 bucket: %s", settings.aws_s3_bucket)
-        
+
         _setup_lifecycle_policy(_s3_client)
     return _s3_client
 
