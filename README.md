@@ -209,6 +209,22 @@ For AWS deployment:
 - Leave `AWS_ENDPOINT_URL` empty.
 - Ensure IAM credentials permit S3 read/write, lifecycle config, and presigned URL flow.
 
+### Cloud Sprint Artifacts
+
+- Terraform scaffolding: `infra/`
+- K8s manifests: `k8s/`
+- Dev CD workflow: `.github/workflows/cd-dev.yaml`
+- Prod CD workflow: `.github/workflows/cd-prod.yaml`
+- Sprint plan: `cloud_sprint_plan.md`
+
+### GitHub Secrets Required For CD
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `MANIFEST_BUCKET`
+- `ALLOWED_INGRESS_CIDRS` (example: `203.0.113.10/32`)
+- `ALB_SECURITY_GROUP_ID` (from Terraform output)
+
 ## Development and Testing
 
 Install dependencies:

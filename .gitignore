@@ -27,6 +27,10 @@ infra/.terraform/
 infra/*.tfstate
 infra/*.tfstate.backup
 infra/.terraform.lock.hcl
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.backup
+infra/**/.terraform.lock.hcl
 
 # Docker
 docker-compose.override.yml
