@@ -1,0 +1,9 @@
+# Example backend config file for:
+# terraform init -backend-config=backend.hcl
+
+bucket         = "pixtools-tfstate-<account>-us-east-1"
+key            = "pixtools/dev/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "pixtools-tf-locks"
+encrypt        = true
+

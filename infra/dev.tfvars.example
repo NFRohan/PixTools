@@ -1,0 +1,9 @@
+environment = "dev"
+aws_region  = "us-east-1"
+
+# Replace with your current public IP/CIDR. Example:
+# allowed_ingress_cidrs = ["203.0.113.10/32"]
+allowed_ingress_cidrs = ["203.0.113.10/32"]
+
+# Manifest sync prefix used by CD workflow.
+manifest_s3_prefix = "manifests/dev"

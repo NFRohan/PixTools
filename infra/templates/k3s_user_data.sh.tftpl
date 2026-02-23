@@ -1,0 +1,152 @@
+#!/bin/bash
+set -euo pipefail
+
+exec > >(tee /var/log/pixtools-bootstrap.log | logger -t pixtools-bootstrap) 2>&1
+
+AWS_REGION="${aws_region}"
+CLUSTER_NAME="${cluster_name}"
+MANIFEST_BUCKET="${manifest_bucket}"
+MANIFEST_PREFIX="${manifest_prefix}"
+VPC_ID="${vpc_id}"
+SSM_PREFIX="${ssm_prefix}"
+
+DB_HOST="${rds_address}"
+DB_USER="${rds_username}"
+DB_PASS="${rds_password}"
+APP_DB="${app_db_name}"
+K3S_DB="${k3s_db_name}"
+
+echo "Starting bootstrap for ${cluster_name} in ${aws_region}"
+
+yum update -y
+yum install -y curl jq unzip tar awscli postgresql15
+
+echo "Waiting for RDS endpoint..."
+until PGPASSWORD="${rds_password}" psql -h "${rds_address}" -U "${rds_username}" -d postgres -c "select 1" >/dev/null 2>&1; do
+  sleep 5
+done
+
+if ! PGPASSWORD="${rds_password}" psql -h "${rds_address}" -U "${rds_username}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${k3s_db_name}'" | grep -q 1; then
+  PGPASSWORD="${rds_password}" psql -h "${rds_address}" -U "${rds_username}" -d postgres -c "CREATE DATABASE ${k3s_db_name};"
+fi
+
+echo "Installing K3s..."
+curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --disable traefik --disable servicelb --datastore-endpoint=postgres://${rds_username}:${rds_password}@${rds_address}:5432/${k3s_db_name}" sh -
+
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+until kubectl get nodes >/dev/null 2>&1; do
+  sleep 3
+done
+
+echo "Installing Helm..."
+curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+chmod 700 /tmp/get_helm.sh
+/tmp/get_helm.sh
+
+echo "Installing AWS Load Balancer Controller..."
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --namespace kube-system \
+  --set clusterName="${cluster_name}" \
+  --set serviceAccount.create=true \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region="${aws_region}" \
+  --set vpcId="${vpc_id}"
+
+echo "Fetching runtime parameters from SSM..."
+get_param() {
+  aws ssm get-parameter --name "$1" --with-decryption --query "Parameter.Value" --output text --region "${aws_region}"
+}
+
+DATABASE_URL="$(get_param "${ssm_prefix}/database_url")"
+REDIS_URL="$(get_param "${ssm_prefix}/redis_url")"
+RABBITMQ_URL="$(get_param "${ssm_prefix}/rabbitmq_url")"
+AWS_S3_BUCKET="$(get_param "${ssm_prefix}/aws_s3_bucket")"
+API_KEY="$(get_param "${ssm_prefix}/api_key")"
+RABBITMQ_USERNAME="$(get_param "${ssm_prefix}/rabbitmq_username")"
+RABBITMQ_PASSWORD="$(get_param "${ssm_prefix}/rabbitmq_password")"
+IDEMPOTENCY_TTL_SECONDS="$(get_param "${ssm_prefix}/idempotency_ttl_seconds")"
+WEBHOOK_CB_FAIL_THRESHOLD="$(get_param "${ssm_prefix}/webhook_cb_fail_threshold")"
+WEBHOOK_CB_RESET_TIMEOUT="$(get_param "${ssm_prefix}/webhook_cb_reset_timeout")"
+
+kubectl create namespace pixtools --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools create secret generic pixtools-runtime \
+  --from-literal=DATABASE_URL="$${DATABASE_URL}" \
+  --from-literal=REDIS_URL="$${REDIS_URL}" \
+  --from-literal=RABBITMQ_URL="$${RABBITMQ_URL}" \
+  --from-literal=AWS_S3_BUCKET="$${AWS_S3_BUCKET}" \
+  --from-literal=API_KEY="$${API_KEY}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools create secret generic rabbitmq-auth \
+  --from-literal=username="$${RABBITMQ_USERNAME}" \
+  --from-literal=password="$${RABBITMQ_PASSWORD}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools create configmap pixtools-config \
+  --from-literal=AWS_REGION="${aws_region}" \
+  --from-literal=IDEMPOTENCY_TTL_SECONDS="$${IDEMPOTENCY_TTL_SECONDS}" \
+  --from-literal=WEBHOOK_CB_FAIL_THRESHOLD="$${WEBHOOK_CB_FAIL_THRESHOLD}" \
+  --from-literal=WEBHOOK_CB_RESET_TIMEOUT="$${WEBHOOK_CB_RESET_TIMEOUT}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+echo "Syncing manifests from S3..."
+mkdir -p /opt/pixtools/manifests
+aws s3 sync "s3://${manifest_bucket}/${manifest_prefix}/" /opt/pixtools/manifests --region "${aws_region}" || true
+
+if find /opt/pixtools/manifests -name "*.yaml" -print -quit | grep -q .; then
+  find /opt/pixtools/manifests -type f -name "*.yaml" -print0 | xargs -0 -n 1 kubectl apply -f
+else
+  echo "No manifests found in S3 prefix s3://${manifest_bucket}/${manifest_prefix}/"
+fi
+
+cat <<'HANDLER' >/usr/local/bin/spot-interrupt-handler.sh
+#!/bin/bash
+set -euo pipefail
+
+METADATA_IP="169.254.169.254"
+TOKEN="$(curl -s -X PUT "http://$${METADATA_IP}/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+
+check_interrupt() {
+  if [ -n "$${TOKEN}" ]; then
+    curl -sf -H "X-aws-ec2-metadata-token: $${TOKEN}" "http://$${METADATA_IP}/latest/meta-data/spot/instance-action" >/dev/null
+  else
+    curl -sf "http://$${METADATA_IP}/latest/meta-data/spot/instance-action" >/dev/null
+  fi
+}
+
+while true; do
+  if check_interrupt; then
+    logger "Spot interruption notice received, draining node"
+    NODE_NAME="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+    kubectl drain "$${NODE_NAME}" --ignore-daemonsets --delete-emptydir-data --force || true
+    sleep 120
+  fi
+  sleep 5
+done
+HANDLER
+
+chmod +x /usr/local/bin/spot-interrupt-handler.sh
+
+cat <<'SERVICE' >/etc/systemd/system/spot-handler.service
+[Unit]
+Description=EC2 Spot Interruption Handler
+After=k3s.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/spot-interrupt-handler.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable --now spot-handler
+
+echo "Bootstrap complete."
