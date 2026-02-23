@@ -1,0 +1,18 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.3
+moto[s3]==5.0.28
+pytest-mock==3.14.0
+pytest-cov==6.0.0
+aiosqlite==0.21.0
+
+# Linting / type-checking
+ruff==0.15.2
+mypy==1.19.1
+
+# DevSecOps
+pip-audit==2.10.0
+bandit==1.9.3
