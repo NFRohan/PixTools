@@ -3,6 +3,11 @@ resource "random_password" "rabbitmq_password" {
   special = false
 }
 
+resource "random_password" "k3s_token" {
+  length  = 48
+  special = false
+}
+
 resource "aws_ssm_parameter" "database_url" {
   name  = "${local.ssm_prefix}/database_url"
   type  = "SecureString"
@@ -79,4 +84,3 @@ resource "aws_ssm_parameter" "api_key" {
   tier  = "Standard"
   value = var.api_key
 }
-

@@ -34,6 +34,7 @@ resource "aws_launch_template" "k3s" {
     cluster_name    = "${local.name_prefix}-k3s"
     manifest_bucket = aws_s3_bucket.manifests.bucket
     manifest_prefix = var.manifest_s3_prefix
+    k3s_token       = random_password.k3s_token.result
     rds_address     = aws_db_instance.main.address
     rds_username    = var.rds_master_username
     rds_password    = random_password.rds_master_password.result

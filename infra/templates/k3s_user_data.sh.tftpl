@@ -9,6 +9,7 @@ MANIFEST_BUCKET="${manifest_bucket}"
 MANIFEST_PREFIX="${manifest_prefix}"
 VPC_ID="${vpc_id}"
 SSM_PREFIX="${ssm_prefix}"
+K3S_TOKEN="${k3s_token}"
 
 DB_HOST="${rds_address}"
 DB_USER="${rds_username}"
@@ -19,7 +20,8 @@ K3S_DB="${k3s_db_name}"
 echo "Starting bootstrap for ${cluster_name} in ${aws_region}"
 
 yum update -y
-yum install -y curl jq unzip tar awscli postgresql15
+# Amazon Linux 2023 ships curl-minimal by default; installing curl conflicts and breaks bootstrap.
+yum install -y jq unzip tar awscli postgresql15
 
 echo "Waiting for RDS endpoint..."
 until PGPASSWORD="${rds_password}" psql -h "${rds_address}" -U "${rds_username}" -d postgres -c "select 1" >/dev/null 2>&1; do
@@ -31,7 +33,17 @@ if ! PGPASSWORD="${rds_password}" psql -h "${rds_address}" -U "${rds_username}" 
 fi
 
 echo "Installing K3s..."
-curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --disable traefik --disable servicelb --datastore-endpoint=postgres://${rds_username}:${rds_password}@${rds_address}:5432/${k3s_db_name}" sh -
+IMDS_TOKEN="$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+if [ -n "$${IMDS_TOKEN}" ]; then
+  INSTANCE_ID="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/instance-id)"
+  AVAILABILITY_ZONE="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+else
+  INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
+  AVAILABILITY_ZONE="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+fi
+PROVIDER_ID="aws:///$${AVAILABILITY_ZONE}/$${INSTANCE_ID}"
+
+curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --disable traefik --disable servicelb --token=$${K3S_TOKEN} --kubelet-arg=provider-id=$${PROVIDER_ID} --datastore-endpoint=postgres://${rds_username}:${rds_password}@${rds_address}:5432/${k3s_db_name}" sh -
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 until kubectl get nodes >/dev/null 2>&1; do
@@ -72,6 +84,19 @@ WEBHOOK_CB_FAIL_THRESHOLD="$(get_param "${ssm_prefix}/webhook_cb_fail_threshold"
 WEBHOOK_CB_RESET_TIMEOUT="$(get_param "${ssm_prefix}/webhook_cb_reset_timeout")"
 
 kubectl create namespace pixtools --dry-run=client -o yaml | kubectl apply -f -
+
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text --region "${aws_region}")"
+ECR_REGISTRY="$${ACCOUNT_ID}.dkr.ecr.${aws_region}.amazonaws.com"
+ECR_PASSWORD="$(aws ecr get-login-password --region "${aws_region}")"
+
+kubectl -n pixtools create secret docker-registry ecr-pull \
+  --docker-server="$${ECR_REGISTRY}" \
+  --docker-username="AWS" \
+  --docker-password="$${ECR_PASSWORD}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools patch serviceaccount default \
+  -p '{"imagePullSecrets":[{"name":"ecr-pull"}]}' || true
 
 kubectl -n pixtools create secret generic pixtools-runtime \
   --from-literal=DATABASE_URL="$${DATABASE_URL}" \
