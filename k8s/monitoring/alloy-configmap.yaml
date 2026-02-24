@@ -83,7 +83,8 @@ data:
       forward_to = [loki.write.grafana_cloud_logs.receiver]
     }
 
-    prometheus.exporter.self "alloy" {}
+    prometheus.exporter.self "alloy" {
+    }
 
     prometheus.scrape "alloy" {
       targets    = prometheus.exporter.self.alloy.targets
@@ -92,8 +93,8 @@ data:
 
     prometheus.scrape "pixtools_api" {
       targets = [{
-        "__address__" = "pixtools-api.pixtools.svc.cluster.local:80",
-        "job"         = "pixtools-api"
+        __address__ = "pixtools-api.pixtools.svc.cluster.local:80",
+        job         = "pixtools-api",
       }]
       forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
     }
