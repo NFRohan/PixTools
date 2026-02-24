@@ -19,21 +19,22 @@ jobs:
       ECR_API_REPO: pixtools-api
       ECR_WORKER_REPO: pixtools-worker
       MANIFEST_PREFIX: manifests/prod
+      AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}
+        if: ${{ env.AWS_DEPLOY_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: pixtools-prod-cd
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure AWS credentials (access key fallback)
-        if: ${{ secrets.AWS_DEPLOY_ROLE_ARN == '' }}
+        if: ${{ env.AWS_DEPLOY_ROLE_ARN == '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
