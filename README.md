@@ -266,6 +266,30 @@ Two practical rollback paths:
 1. Re-run a previous successful CD workflow run (previous commit state).
 2. Redeploy previous image digest by updating rendered manifest image references and re-applying.
 
+### Full teardown (destroy demo environment)
+
+Use the PowerShell teardown script for a complete cleanup pass:
+- scales K3s ASG to zero
+- removes in-cluster workloads via SSM
+- deletes AWS Load Balancer Controller artifacts (ALB/target groups/security groups)
+- purges ECR images and versioned S3 buckets
+- runs `terraform destroy` (with retry cleanup)
+- removes SSM runtime parameters
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\teardown\teardown-aws.ps1 -Environment dev
+```
+
+Non-interactive destroy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\teardown\teardown-aws.ps1 -Environment dev -AutoApprove
+```
+
+Optional flags:
+- `-DestroyBackend` to also remove Terraform backend S3 state bucket and lock table.
+- `-DeleteGithubDeployRole` to delete the GitHub deploy IAM role (`GitHubActionsPixToolsDeployRole` by default).
+
 ## Security Notes
 
 - Runtime secrets are sourced from SSM and injected into Kubernetes secrets/config at bootstrap.
@@ -286,6 +310,7 @@ alembic/           Schema migrations
 infra/             Terraform IaC
 k8s/               Kubernetes manifests templates
 scripts/deploy/    Manifest rendering and SSM deploy helpers
+scripts/teardown/  Full environment teardown helpers
 tests/             Unit/integration tests
 ```
 

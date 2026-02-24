@@ -38,3 +38,6 @@ infra/errored.tfstate
 
 # Docker
 docker-compose.override.yml
+
+# Local scratch files
+temp/
