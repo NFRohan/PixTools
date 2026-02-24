@@ -65,6 +65,7 @@ const EXT_TO_FORMAT = {
 };
 const QUALITY_OPS = new Set(['jpg', 'webp']);
 const RESIZE_OPS = new Set(['jpg', 'png', 'webp', 'avif', 'denoise']);
+const PROCESS_TIMEOUT_MS = 90000;
 
 // --- Initialization ---
 
@@ -287,15 +288,21 @@ btnProcess.addEventListener('click', async () => {
     }
 
     try {
-        const response = await fetch('/api/process', {
+        const response = await fetchWithTimeout('/api/process', {
             method: 'POST',
             headers: {
                 'Idempotency-Key': idempotencyKey
             },
             body: formData // No Content-Type header needed for FormData
-        });
+        }, PROCESS_TIMEOUT_MS);
 
-        const data = await response.json();
+        let data = null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            data = { detail: await response.text() };
+        }
 
         if (!response.ok) {
             throw new Error(data.detail || `Server error: ${response.status}`);
@@ -308,7 +315,11 @@ btnProcess.addEventListener('click', async () => {
         startPolling(jobId);
 
     } catch (err) {
-        showError(opsError, err.message);
+        if (err.name === 'AbortError') {
+            showError(opsError, 'Upload timed out. Please retry.');
+        } else {
+            showError(opsError, err.message);
+        }
         restoreProcessButton();
     }
 });
@@ -603,6 +614,17 @@ function hideError(container) {
     container.classList.add('hidden');
     container.textContent = '';
 }
+
+async function fetchWithTimeout(resource, options = {}, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(resource, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 function clearHistory() {
     localStorage.removeItem(STORAGE_KEY);
     historyContainer.innerHTML = '';
