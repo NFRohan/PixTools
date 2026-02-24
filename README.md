@@ -19,6 +19,12 @@ Core behavior:
 - ZIP bundle generation for processed outputs
 - 24-hour retention model for S3 objects and job history
 
+## Live Demo
+
+- App: `http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com`
+- API docs: `http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/docs`
+- Health check: `http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/api/health`
+
 ## Architecture
 
 ```mermaid
