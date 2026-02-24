@@ -73,6 +73,31 @@ output "alerts_sns_topic_arn" {
   value       = aws_sns_topic.alerts.arn
 }
 
+output "grafana_cloud_stack_id_parameter" {
+  description = "SSM parameter name storing Grafana Cloud stack/user ID."
+  value       = try(aws_ssm_parameter.grafana_cloud_stack_id[0].name, null)
+}
+
+output "grafana_cloud_api_key_parameter" {
+  description = "SSM parameter name storing Grafana Cloud API key."
+  value       = try(aws_ssm_parameter.grafana_cloud_api_key[0].name, null)
+}
+
+output "grafana_cloud_logs_url_parameter" {
+  description = "SSM parameter name storing Grafana Cloud Loki push URL."
+  value       = try(aws_ssm_parameter.grafana_cloud_logs_url[0].name, null)
+}
+
+output "grafana_cloud_metrics_url_parameter" {
+  description = "SSM parameter name storing Grafana Cloud metrics remote_write URL."
+  value       = try(aws_ssm_parameter.grafana_cloud_metrics_url[0].name, null)
+}
+
+output "grafana_cloud_traces_url_parameter" {
+  description = "SSM parameter name storing Grafana Cloud OTLP traces URL."
+  value       = try(aws_ssm_parameter.grafana_cloud_traces_url[0].name, null)
+}
+
 output "ingress_alb_arn" {
   description = "Detected AWS Load Balancer Controller ALB ARN (if present)."
   value       = local.ingress_alb_arn

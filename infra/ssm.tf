@@ -84,3 +84,48 @@ resource "aws_ssm_parameter" "api_key" {
   tier  = "Standard"
   value = var.api_key
 }
+
+resource "aws_ssm_parameter" "grafana_cloud_stack_id" {
+  count = var.grafana_cloud_stack_id != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_stack_id"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_stack_id
+}
+
+resource "aws_ssm_parameter" "grafana_cloud_api_key" {
+  count = var.grafana_cloud_api_key != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_api_key"
+  type  = "SecureString"
+  tier  = "Standard"
+  value = var.grafana_cloud_api_key
+}
+
+resource "aws_ssm_parameter" "grafana_cloud_logs_url" {
+  count = var.grafana_cloud_logs_url != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_logs_url"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_logs_url
+}
+
+resource "aws_ssm_parameter" "grafana_cloud_metrics_url" {
+  count = var.grafana_cloud_metrics_url != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_metrics_url"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_metrics_url
+}
+
+resource "aws_ssm_parameter" "grafana_cloud_traces_url" {
+  count = var.grafana_cloud_traces_url != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_traces_url"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_traces_url
+}

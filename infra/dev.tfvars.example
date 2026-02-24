@@ -10,3 +10,10 @@ manifest_s3_prefix = "manifests/dev"
 
 # Optional email recipient for CloudWatch alarm notifications.
 # alarm_email = "you@example.com"
+
+# Grafana Cloud integration (Alloy exporter targets).
+# grafana_cloud_stack_id    = "123456"
+# grafana_cloud_api_key     = "glc_..."
+# grafana_cloud_logs_url    = "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
+# grafana_cloud_metrics_url = "https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
+# grafana_cloud_traces_url  = "https://otlp-gateway-prod-us-east-0.grafana.net/otlp"

@@ -94,7 +94,19 @@ jobs:
           MANIFEST_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
         run: |
           chmod +x scripts/deploy/run-on-ssm.sh
-          scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "aws s3 sync s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX} /opt/pixtools/manifests --delete && find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -n 1 kubectl apply -f"
+          REMOTE_CMD="$(cat <<EOF
+          set -euo pipefail
+          GRAFANA_STACK_ID=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_stack_id --query Parameter.Value --output text 2>/dev/null || true)
+          GRAFANA_API_KEY=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_api_key --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
+          GRAFANA_LOGS_URL=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_logs_url --query Parameter.Value --output text 2>/dev/null || true)
+          GRAFANA_METRICS_URL=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_metrics_url --query Parameter.Value --output text 2>/dev/null || true)
+          GRAFANA_TRACES_URL=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_traces_url --query Parameter.Value --output text 2>/dev/null || true)
+          kubectl -n pixtools create secret generic grafana-cloud --from-literal=stack_id="\${GRAFANA_STACK_ID}" --from-literal=api_key="\${GRAFANA_API_KEY}" --from-literal=logs_url="\${GRAFANA_LOGS_URL}" --from-literal=metrics_url="\${GRAFANA_METRICS_URL}" --from-literal=traces_url="\${GRAFANA_TRACES_URL}" --dry-run=client -o yaml | kubectl apply -f -
+          aws s3 sync s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX} /opt/pixtools/manifests --delete
+          find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -n 1 kubectl apply -f
+          EOF
+          )"
+          scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "${REMOTE_CMD}"
 
       - name: Post-deploy pod status
         run: |

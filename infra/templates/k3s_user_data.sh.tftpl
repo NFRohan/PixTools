@@ -72,11 +72,20 @@ get_param() {
   aws ssm get-parameter --name "$1" --with-decryption --query "Parameter.Value" --output text --region "${aws_region}"
 }
 
+get_param_optional() {
+  aws ssm get-parameter --name "$1" --with-decryption --query "Parameter.Value" --output text --region "${aws_region}" 2>/dev/null || true
+}
+
 DATABASE_URL="$(get_param "${ssm_prefix}/database_url")"
 REDIS_URL="$(get_param "${ssm_prefix}/redis_url")"
 RABBITMQ_URL="$(get_param "${ssm_prefix}/rabbitmq_url")"
 AWS_S3_BUCKET="$(get_param "${ssm_prefix}/aws_s3_bucket")"
 API_KEY="$(get_param "${ssm_prefix}/api_key")"
+GRAFANA_CLOUD_STACK_ID="$(get_param_optional "${ssm_prefix}/grafana_cloud_stack_id")"
+GRAFANA_CLOUD_API_KEY="$(get_param_optional "${ssm_prefix}/grafana_cloud_api_key")"
+GRAFANA_CLOUD_LOGS_URL="$(get_param_optional "${ssm_prefix}/grafana_cloud_logs_url")"
+GRAFANA_CLOUD_METRICS_URL="$(get_param_optional "${ssm_prefix}/grafana_cloud_metrics_url")"
+GRAFANA_CLOUD_TRACES_URL="$(get_param_optional "${ssm_prefix}/grafana_cloud_traces_url")"
 RABBITMQ_USERNAME="$(get_param "${ssm_prefix}/rabbitmq_username")"
 RABBITMQ_PASSWORD="$(get_param "${ssm_prefix}/rabbitmq_password")"
 IDEMPOTENCY_TTL_SECONDS="$(get_param "${ssm_prefix}/idempotency_ttl_seconds")"
@@ -111,11 +120,24 @@ kubectl -n pixtools create secret generic rabbitmq-auth \
   --from-literal=password="$${RABBITMQ_PASSWORD}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
+kubectl -n pixtools create secret generic grafana-cloud \
+  --from-literal=stack_id="$${GRAFANA_CLOUD_STACK_ID}" \
+  --from-literal=api_key="$${GRAFANA_CLOUD_API_KEY}" \
+  --from-literal=logs_url="$${GRAFANA_CLOUD_LOGS_URL}" \
+  --from-literal=metrics_url="$${GRAFANA_CLOUD_METRICS_URL}" \
+  --from-literal=traces_url="$${GRAFANA_CLOUD_TRACES_URL}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 kubectl -n pixtools create configmap pixtools-config \
   --from-literal=AWS_REGION="${aws_region}" \
   --from-literal=IDEMPOTENCY_TTL_SECONDS="$${IDEMPOTENCY_TTL_SECONDS}" \
   --from-literal=WEBHOOK_CB_FAIL_THRESHOLD="$${WEBHOOK_CB_FAIL_THRESHOLD}" \
   --from-literal=WEBHOOK_CB_RESET_TIMEOUT="$${WEBHOOK_CB_RESET_TIMEOUT}" \
+  --from-literal=OBSERVABILITY_ENABLED="true" \
+  --from-literal=METRICS_ENABLED="true" \
+  --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT="http://alloy.pixtools.svc.cluster.local:4318" \
+  --from-literal=OTEL_SERVICE_NAME_API="pixtools-api" \
+  --from-literal=OTEL_SERVICE_NAME_WORKER="pixtools-worker" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "Syncing manifests from S3..."

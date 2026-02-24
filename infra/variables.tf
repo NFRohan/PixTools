@@ -147,6 +147,36 @@ variable "api_key" {
   default     = "pixtools-demo-key"
 }
 
+variable "grafana_cloud_stack_id" {
+  description = "Grafana Cloud stack/user ID used for basic auth."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_cloud_api_key" {
+  description = "Grafana Cloud API key/token with logs/metrics/traces ingest scopes."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_cloud_logs_url" {
+  description = "Grafana Cloud Loki push endpoint URL."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_cloud_metrics_url" {
+  description = "Grafana Cloud Prometheus remote_write endpoint URL."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_cloud_traces_url" {
+  description = "Grafana Cloud OTLP traces endpoint URL."
+  type        = string
+  default     = ""
+}
+
 variable "alarm_email" {
   description = "Optional email endpoint for CloudWatch alarm notifications."
   type        = string
