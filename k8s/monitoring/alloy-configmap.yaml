@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: pixtools
+data:
+  config.alloy: |
+    logging {
+      level = "info"
+      format = "logfmt"
+    }
+
+    otelcol.auth.basic "grafana_cloud" {
+      username = sys.env("GRAFANA_CLOUD_STACK_ID")
+      password = sys.env("GRAFANA_CLOUD_API_KEY")
+    }
+
+    otelcol.receiver.otlp "pixtools" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+
+      output {
+        traces  = [otelcol.processor.batch.pixtools.input]
+        metrics = [otelcol.processor.batch.pixtools.input]
+        logs    = [otelcol.processor.batch.pixtools.input]
+      }
+    }
+
+    otelcol.processor.batch "pixtools" {
+      output {
+        traces  = [otelcol.exporter.otlphttp.grafana_cloud_traces.input]
+        metrics = [otelcol.exporter.prometheus.grafana_cloud_metrics.input]
+        logs    = [otelcol.exporter.loki.grafana_cloud_logs.input]
+      }
+    }
+
+    otelcol.exporter.otlphttp "grafana_cloud_traces" {
+      client {
+        endpoint = sys.env("GRAFANA_CLOUD_TRACES_URL")
+        auth     = otelcol.auth.basic.grafana_cloud.handler
+      }
+    }
+
+    otelcol.exporter.prometheus "grafana_cloud_metrics" {
+      forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
+    }
+
+    prometheus.remote_write "grafana_cloud_metrics" {
+      endpoint {
+        url = sys.env("GRAFANA_CLOUD_METRICS_URL")
+        basic_auth {
+          username = sys.env("GRAFANA_CLOUD_STACK_ID")
+          password = sys.env("GRAFANA_CLOUD_API_KEY")
+        }
+      }
+    }
+
+    otelcol.exporter.loki "grafana_cloud_logs" {
+      forward_to = [loki.write.grafana_cloud_logs.receiver]
+    }
+
+    loki.write "grafana_cloud_logs" {
+      endpoint {
+        url = sys.env("GRAFANA_CLOUD_LOGS_URL")
+        basic_auth {
+          username = sys.env("GRAFANA_CLOUD_STACK_ID")
+          password = sys.env("GRAFANA_CLOUD_API_KEY")
+        }
+      }
+    }
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.kubernetes.pods.targets
+      forward_to = [loki.write.grafana_cloud_logs.receiver]
+    }
+
+    prometheus.exporter.self "alloy" {}
+
+    prometheus.scrape "alloy" {
+      targets    = prometheus.exporter.self.alloy.targets
+      forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
+    }
+
+    prometheus.scrape "pixtools_api" {
+      targets = [{
+        "__address__" = "pixtools-api.pixtools.svc.cluster.local:80",
+        "job"         = "pixtools-api"
+      }]
+      forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
+    }

@@ -14,4 +14,8 @@ data:
   PRESIGNED_URL_EXPIRY_SECONDS: "86400"
   JOB_RETENTION_HOURS: "24"
   S3_RETENTION_DAYS: "1"
-
+  OBSERVABILITY_ENABLED: "true"
+  METRICS_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy.pixtools.svc.cluster.local:4318"
+  OTEL_SERVICE_NAME_API: "pixtools-api"
+  OTEL_SERVICE_NAME_WORKER: "pixtools-worker"

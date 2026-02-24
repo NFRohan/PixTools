@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: pixtools
+  labels:
+    app: alloy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.7.4
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: http
+              containerPort: 12345
+          env:
+            - name: GRAFANA_CLOUD_STACK_ID
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: stack_id
+            - name: GRAFANA_CLOUD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: api_key
+            - name: GRAFANA_CLOUD_LOGS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: logs_url
+            - name: GRAFANA_CLOUD_METRICS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: metrics_url
+            - name: GRAFANA_CLOUD_TRACES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: traces_url
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 12345
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 12345
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "384Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: storage
+              mountPath: /var/lib/alloy
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+        - name: storage
+          emptyDir: {}

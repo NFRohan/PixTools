@@ -17,3 +17,12 @@ These are replaced in CI/CD before sync to S3.
 - API service is `NodePort` to support ALB target type `instance`.
 - Runtime secret/config (`pixtools-runtime`, `pixtools-config`) is created by EC2 bootstrap from SSM.
 
+## Monitoring Components
+
+`k8s/monitoring/` deploys a lightweight Grafana Cloud collector path:
+
+- Grafana Alloy collector
+- OTLP receive endpoint (`alloy.pixtools.svc.cluster.local:4318`)
+- Kubernetes log discovery and export to Grafana Cloud Loki
+- Prometheus scrape/remote-write to Grafana Cloud Metrics
+- OTLP trace export to Grafana Cloud Tempo
