@@ -6,7 +6,7 @@ metadata:
   labels:
     app: pixtools-api
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: pixtools-api
@@ -15,6 +15,18 @@ spec:
       labels:
         app: pixtools-api
     spec:
+      imagePullSecrets:
+        - name: ecr-pull
+      initContainers:
+        - name: migrate
+          image: __API_IMAGE__
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: pixtools-config
+            - secretRef:
+                name: pixtools-runtime
       containers:
         - name: api
           image: __API_IMAGE__
@@ -48,4 +60,3 @@ spec:
             limits:
               cpu: "750m"
               memory: "768Mi"
-
