@@ -68,3 +68,12 @@ output "ssm_parameter_prefix" {
   value       = local.ssm_prefix
 }
 
+output "alerts_sns_topic_arn" {
+  description = "SNS topic ARN for infrastructure and runtime alarms."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "ingress_alb_arn" {
+  description = "Detected AWS Load Balancer Controller ALB ARN (if present)."
+  value       = local.ingress_alb_arn
+}

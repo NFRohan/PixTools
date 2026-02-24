@@ -7,3 +7,6 @@ allowed_ingress_cidrs = ["203.0.113.10/32"]
 
 # Manifest sync prefix used by CD workflow.
 manifest_s3_prefix = "manifests/dev"
+
+# Optional email recipient for CloudWatch alarm notifications.
+# alarm_email = "you@example.com"

@@ -147,3 +147,32 @@ variable "api_key" {
   default     = "pixtools-demo-key"
 }
 
+variable "alarm_email" {
+  description = "Optional email endpoint for CloudWatch alarm notifications."
+  type        = string
+  default     = ""
+}
+
+variable "alarm_alb_5xx_threshold" {
+  description = "ALB 5XX alarm threshold (sum per 60s period)."
+  type        = number
+  default     = 5
+}
+
+variable "alarm_asg_inservice_min" {
+  description = "Minimum in-service ASG instances before alarm."
+  type        = number
+  default     = 1
+}
+
+variable "alarm_rds_cpu_threshold_percent" {
+  description = "RDS CPU alarm threshold percentage."
+  type        = number
+  default     = 80
+}
+
+variable "alarm_rds_free_storage_min_bytes" {
+  description = "Minimum free RDS storage before alarm."
+  type        = number
+  default     = 2147483648 # 2 GiB
+}
