@@ -1,7 +1,13 @@
-# PixTools
+# PixTools: Distributed Image Processing Platform
 
-PixTools is a distributed image-processing system built with FastAPI + Celery.  
-It is designed as a resume-grade project that demonstrates async task orchestration, operational resilience, and cloud deployment discipline.
+![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-blue)
+![Infrastructure](https://img.shields.io/badge/IaC-Terraform-623CE4)
+![Kubernetes](https://img.shields.io/badge/Orchestration-K3s-326CE5)
+![Observability](https://img.shields.io/badge/Observability-Grafana_LGTM-F46800)
+
+PixTools is a production-grade, distributed asynchronous image-processing system. It is engineered to handle compute-heavy ML inference and standard image operations at scale, prioritizing high availability, operational resilience, and zero-trust deployment pipelines.
+
+**[View Live Demo](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com)** | **[Explore API Docs](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/docs)** | **[Check System Health](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/api/health)**
 
 ## Overview
 
@@ -18,12 +24,6 @@ Core behavior:
 - webhook callback with circuit-breaker protection
 - ZIP bundle generation for processed outputs
 - 24-hour retention model for S3 objects and job history
-
-## Live Demo
-
-- App: `http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com`
-- API docs: `http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/docs`
-- Health check: `http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/api/health`
 
 ## Architecture
 
@@ -49,40 +49,21 @@ flowchart LR
 
 ## Runtime Topology
 
-| Layer | Stack | Hosting |
-|---|---|---|
-| API | FastAPI + Uvicorn | K3s pod |
-| Task Queue | Celery 5 + RabbitMQ | K3s pods |
-| Idempotency/Backend | Redis | K3s pod |
-| Stateful DB | PostgreSQL 16 | AWS RDS `db.t4g.micro` (single AZ) |
-| Object Storage | S3 | AWS managed |
-| Compute | K3s on EC2 Spot | ASG with `m7i-flex.large` primary |
-| Ingress | AWS Load Balancer Controller | ALB (internet-facing) |
-| Config/Secrets | SSM Parameter Store -> K8s Secret/ConfigMap | AWS + bootstrap |
-| Images | ECR (`pixtools-api`, `pixtools-worker`) | AWS managed |
+| Component | Implementation | Rationale |
+| :--- | :--- | :--- |
+| **Ingress & API** | AWS ALB Controller -> K3s Pods -> FastAPI | Horizontally scalable edge routing with built-in health probing. |
+| **Message Broker** | RabbitMQ (StatefulSet) | Durable, persistent queueing with Dead Letter Exchanges for failed tasks. |
+| **State & Locking** | Redis & PostgreSQL 16 (AWS RDS) | Separated transient lock/idempotency state (Redis) from persistent job tracking (RDS). |
+| **Infrastructure** | Terraform + AWS SSM | 100% declarative IaC. Secrets are never hardcoded; injected securely via Systems Manager Parameter Store. |
+| **CI/CD** | GitHub Actions (OIDC) | Zero-trust deployment pipeline utilizing short-lived STS tokens (no long-lived IAM user keys). |
 
-## Key Features
+## System Design & Engineering Highlights
 
-- Celery queue routing:
-  - `default_queue`: conversions, metadata, archive, finalize, maintenance
-  - `ml_inference_queue`: denoise
-- Dead-letter exchange configuration for failed messages.
-- Deep health checks on `GET /api/health`:
-  - database
-  - redis
-  - rabbitmq
-  - s3
-- Job pruning:
-  - hourly Celery Beat task (`app.tasks.maintenance.prune_expired_jobs`)
-- Webhook resilience:
-  - `pybreaker` circuit breaker (`WEBHOOK_CB_FAIL_THRESHOLD`, `WEBHOOK_CB_RESET_TIMEOUT`)
-- Frontend processing safeguards:
-  - request timeout handling
-  - robust idempotency key generation even when `crypto.randomUUID()` is unavailable
-- Monitoring and alerting:
-  - CloudWatch alarms for ALB 5XX, ASG in-service count, and RDS CPU/free storage
-  - SNS topic for alarm fan-out (optional email subscription)
-  - Lightweight Alloy collector shipping logs/metrics/traces to Grafana Cloud
+* **Asynchronous Orchestration:** Decoupled the FastAPI ingress from heavy compute tasks using RabbitMQ and Celery. Dedicated worker queues (`default_queue` vs. `ml_inference_queue`) prevent long-running ML jobs (like DnCNN denoising) from starving standard conversion tasks.
+* **Idempotency & Fault Tolerance:** Implemented `Idempotency-Key` headers backed by Redis to guarantee safe retries across distributed network drops. 
+* **Resilient Webhook Callbacks:** Integrated `pybreaker` circuit breakers to protect the worker nodes from cascading failures when client webhook endpoints are unreachable or slow.
+* **Cloud-Native Observability:** Instrumented with OpenTelemetry, shipping logs, metrics, and traces to a Grafana Cloud LGTM stack via a lightweight Alloy DaemonSet, ensuring complete visibility without burdening the K3s node.
+* **Cost-Optimized Compute:** Deployed on an AWS Auto Scaling Group utilizing highly ephemeral `m7i-flex.large` Spot Instances, achieving production-like architecture at a fraction of on-demand costs.
 
 ## API Contract
 
@@ -94,6 +75,9 @@ Base path: `/api`
 - `file` (required)
 - `operations` (required, JSON string array, example `["webp","metadata"]`)
 - `operation_params` (optional JSON string object keyed by operation)
+  - Options supported: 
+    - `quality` (1-100) for `jpg` and `webp`
+    - `resize` (`width` and/or `height` in px) for conversion operations
 - `webhook_url` (optional)
 
 Header:
@@ -164,8 +148,9 @@ docker compose logs -f worker-standard
 docker compose run --rm migrate
 ```
 
-## Cloud Deployment (AWS, `us-east-1`)
+## Infrastructure & Operations (GitOps)
 
+Deployments are entirely automated using GitHub Actions pipelines and applied dynamically via AWS Systems Manager (SSM).
 Infrastructure code lives in `infra/`.  
 Rendered manifests are generated from `k8s/` by `scripts/deploy/render-manifests.sh`.
 
@@ -350,6 +335,10 @@ docker compose down -v
 docker compose up -d --build
 docker compose logs -f migrate
 ```
+
+## About This Project
+
+PixTools was built from scratch to demonstrate full-lifecycle cloud engineering capabilities. Rather than relying on managed PaaS providers (like Heroku or Vercel), I chose to architect the underlying VPC, subnets, Kubernetes cluster, and CI/CD pipelines directly in AWS using Terraform. This project serves as a practical demonstration of handling distributed system complexities, secure IAM federation, and advanced observability. 
 
 ## License
 
