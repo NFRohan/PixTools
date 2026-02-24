@@ -19,20 +19,20 @@ def _get_client():
     """Lazy-init S3 client (supports LocalStack via endpoint override)."""
     global _s3_client
     if _s3_client is None:
-        kwargs = {
-            "region_name": settings.aws_region,
-            "aws_access_key_id": settings.aws_access_key_id,
-            "aws_secret_access_key": settings.aws_secret_access_key,
-        }
+        kwargs = {"region_name": settings.aws_region}
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            kwargs["aws_access_key_id"] = settings.aws_access_key_id
+            kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
         if settings.aws_endpoint_url:
             kwargs["endpoint_url"] = settings.aws_endpoint_url
         _s3_client = boto3.client("s3", **kwargs)
-        # Ensure bucket exists (LocalStack dev)
-        try:
-            _s3_client.head_bucket(Bucket=settings.aws_s3_bucket)
-        except Exception:
-            _s3_client.create_bucket(Bucket=settings.aws_s3_bucket)
-            logger.info("Created S3 bucket: %s", settings.aws_s3_bucket)
+        # For LocalStack dev only, ensure the bucket exists.
+        if settings.aws_endpoint_url:
+            try:
+                _s3_client.head_bucket(Bucket=settings.aws_s3_bucket)
+            except Exception:
+                _s3_client.create_bucket(Bucket=settings.aws_s3_bucket)
+                logger.info("Created S3 bucket: %s", settings.aws_s3_bucket)
 
         _setup_lifecycle_policy(_s3_client)
     return _s3_client

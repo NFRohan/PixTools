@@ -7,8 +7,8 @@ class Settings(BaseSettings):
     """Central configuration — all values come from env vars or .env file."""
 
     # AWS
-    aws_access_key_id: str = "test"
-    aws_secret_access_key: str = "test"
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
     aws_region: str = "us-east-1"
     aws_s3_bucket: str = "pixtools-images"
     aws_endpoint_url: str | None = None  # set for LocalStack
