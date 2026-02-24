@@ -31,6 +31,10 @@ infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.backup
 infra/**/.terraform.lock.hcl
+infra/backend.hcl
+infra/dev.tfvars
+infra/tfplan*
+infra/errored.tfstate
 
 # Docker
 docker-compose.override.yml

@@ -1,267 +1,271 @@
 # PixTools
 
-PixTools is an asynchronous image-processing service built with FastAPI, Celery, PostgreSQL, Redis, RabbitMQ, and S3-compatible object storage.
+PixTools is a distributed image-processing system built with FastAPI + Celery.  
+It is designed as a resume-grade project that demonstrates async task orchestration, operational resilience, and cloud deployment discipline.
 
-It accepts uploads, executes processing tasks in the background, and exposes downloadable results through presigned URLs and a web UI.
+## Overview
 
-## Core Capabilities
+Users upload an image from the frontend, choose one or more operations, and receive downloadable outputs when background processing completes.
 
-- Async job pipeline with Celery canvas (`group` + `chord`) and job finalization.
-- Format conversion: `jpg`, `png`, `webp`, `avif`.
-- ML denoising (`denoise`) via PyTorch DnCNN.
-- EXIF metadata extraction as a first-class operation (`metadata`).
-- Optional per-operation params:
-  - `quality` for `jpg` and `webp`
-  - `resize` for `jpg`, `png`, `webp`, `avif`, `denoise`
-- ZIP bundling of completed artifacts.
-- Optional outbound webhook on completion.
-- Idempotency key support for safe retries.
-- 24-hour retention model for job/result access.
+Supported operations:
+- `jpg`, `png`, `webp`, `avif` format conversion
+- `denoise` (DnCNN)
+- `metadata` (EXIF extraction)
 
-## High-Level Architecture
+Core behavior:
+- async processing via RabbitMQ + Celery
+- idempotent request handling (`Idempotency-Key` header)
+- webhook callback with circuit-breaker protection
+- ZIP bundle generation for processed outputs
+- 24-hour retention model for S3 objects and job history
 
-`Client/UI -> FastAPI -> RabbitMQ -> Celery workers -> S3 + PostgreSQL`
+## Architecture
 
-Runtime services in local Docker:
+```mermaid
+flowchart LR
+  U[Frontend] --> ALB[ALB Ingress]
+  ALB --> API[FastAPI API]
+  API --> PG[(Postgres / RDS)]
+  API --> REDIS[(Redis)]
+  API --> S3[(S3)]
+  API --> RMQ[(RabbitMQ)]
 
-- `api`: FastAPI app (`app.main`)
-- `worker-standard`: conversion, finalize, archive, metadata tasks (`default_queue`)
-- `worker-ml`: denoising task (`ml_inference_queue`, solo pool)
-- `postgres`: job persistence
-- `redis`: idempotency + Celery result backend
-- `rabbitmq`: broker
-- `localstack`: local S3-compatible storage
-- `migrate`: one-shot Alembic migration runner
+  RMQ --> W1[Celery Worker Standard]
+  RMQ --> W2[Celery Worker ML]
+  RMQ --> B[Celery Beat]
 
-## Repository Layout
-
-```text
-app/
-  routers/        # API endpoints
-  tasks/          # Celery tasks (image ops, metadata, archive, finalize, ML)
-  services/       # S3, DAG builder, idempotency, webhook delivery
-  static/         # Frontend UI (vanilla JS)
-  ml/             # DnCNN network definition
-alembic/          # Database migrations
-models/           # Model weights
-tests/            # API and task tests
+  W1 --> S3
+  W2 --> S3
+  W1 --> PG
+  W2 --> PG
+  B --> PG
 ```
 
-## Quick Start (Docker)
+## Runtime Topology
 
-### 1. Configure environment
+| Layer | Stack | Hosting |
+|---|---|---|
+| API | FastAPI + Uvicorn | K3s pod |
+| Task Queue | Celery 5 + RabbitMQ | K3s pods |
+| Idempotency/Backend | Redis | K3s pod |
+| Stateful DB | PostgreSQL 16 | AWS RDS `db.t4g.micro` (single AZ) |
+| Object Storage | S3 | AWS managed |
+| Compute | K3s on EC2 Spot | ASG with `m7i-flex.large` primary |
+| Ingress | AWS Load Balancer Controller | ALB (internet-facing) |
+| Config/Secrets | SSM Parameter Store -> K8s Secret/ConfigMap | AWS + bootstrap |
+| Images | ECR (`pixtools-api`, `pixtools-worker`) | AWS managed |
 
-```bash
-cp .env.example .env
-```
+## Key Features
 
-### 2. Build and start
+- Celery queue routing:
+  - `default_queue`: conversions, metadata, archive, finalize, maintenance
+  - `ml_inference_queue`: denoise
+- Dead-letter exchange configuration for failed messages.
+- Deep health checks on `GET /api/health`:
+  - database
+  - redis
+  - rabbitmq
+  - s3
+- Job pruning:
+  - hourly Celery Beat task (`app.tasks.maintenance.prune_expired_jobs`)
+- Webhook resilience:
+  - `pybreaker` circuit breaker (`WEBHOOK_CB_FAIL_THRESHOLD`, `WEBHOOK_CB_RESET_TIMEOUT`)
+- Frontend processing safeguards:
+  - request timeout handling
+  - robust idempotency key generation even when `crypto.randomUUID()` is unavailable
 
-```bash
-docker compose up -d --build
-```
+## API Contract
 
-`migrate` runs `alembic upgrade head` before the API and workers start.
-
-### 3. Verify services
-
-```bash
-docker compose ps
-docker compose logs -f migrate
-```
-
-### 4. Open interfaces
-
-- App UI: http://localhost:8000
-- OpenAPI docs: http://localhost:8000/docs
-- RabbitMQ management: http://localhost:15672
-
-### 5. Re-run migrations manually (if needed)
-
-```bash
-docker compose run --rm migrate
-```
-
-## API Reference
+Base path: `/api`
 
 ### `POST /api/process`
 
-Queues one or more operations for an uploaded image.
+`multipart/form-data` request:
+- `file` (required)
+- `operations` (required, JSON string array, example `["webp","metadata"]`)
+- `operation_params` (optional JSON string object keyed by operation)
+- `webhook_url` (optional)
 
-- Content type: `multipart/form-data`
-- Required fields:
-  - `file`
-  - `operations` JSON array (for example: `["webp","metadata"]`)
-- Optional fields:
-  - `operation_params` JSON object keyed by operation
-  - `idempotency_key`
-  - `webhook_url`
-
-Example with quality + resize + webhook:
-
-```bash
-curl -X POST "http://localhost:8000/api/process" \
-  -F "file=@test_image.png" \
-  -F "operations=[\"webp\",\"denoise\",\"metadata\"]" \
-  -F "operation_params={\"webp\":{\"quality\":80},\"denoise\":{\"resize\":{\"width\":1280}}}" \
-  -F "webhook_url=https://webhook.site/<your-id>" \
-  -F "idempotency_key=demo-001"
-```
-
-### `GET /api/jobs/{job_id}`
-
-Returns current job state:
-
-- `status`
-- `result_urls` (operation -> presigned URL)
-- `archive_url` (ZIP, when ready)
-- `metadata` (EXIF fields, if available)
-- `error_message`
-- `created_at`
+Header:
+- `Idempotency-Key` (optional but recommended)
 
 Example:
 
 ```bash
-curl "http://localhost:8000/api/jobs/<job_id>"
+curl -X POST "http://localhost:8000/api/process" \
+  -H "Idempotency-Key: demo-001" \
+  -F "file=@test_image.png;type=image/png" \
+  -F "operations=[\"webp\",\"denoise\",\"metadata\"]" \
+  -F "operation_params={\"webp\":{\"quality\":80},\"denoise\":{\"resize\":{\"width\":1280}}}" \
+  -F "webhook_url=https://webhook.site/<id>"
 ```
+
+### `GET /api/jobs/{job_id}`
+
+Returns current state and outputs:
+- `status`
+- `operations`
+- `result_urls`
+- `archive_url`
+- `metadata`
+- `error_message`
+- `created_at`
 
 ### `GET /api/health`
 
-Deep dependency check for database, Redis, and S3.
+Dependency health probe used for readiness/liveness.
 
-## Operations
+## Local Development
 
-- `jpg`
-- `png`
-- `webp`
-- `avif`
-- `denoise`
-- `metadata`
+### Prerequisites
 
-Behavior notes:
+- Docker + Docker Compose
 
-- Same-format conversion is rejected.
-- Denoise outputs PNG.
-- Metadata can run alone or alongside processing tasks.
-- ZIP download is generated asynchronously after processing completion.
+### Start stack
 
-## Frontend Behavior
-
-- Drag/drop upload with preview and operation picker.
-- Quality slider appears only for `jpg`/`webp`.
-- Resize fields appear only for resize-capable operations.
-- Metadata rendered in a dedicated panel.
-- Completed downloadable jobs are persisted locally for up to 24 hours.
-- `Process Another` cancels active poll context to avoid stale result resurfacing.
-
-## Webhook Testing
-
-Use a request-capture endpoint (for example webhook.site):
-
-1. Create a temporary URL at https://webhook.site
-2. Submit a job with `webhook_url=<that-url>`
-3. Confirm payload receipt:
-
-```json
-{
-  "job_id": "<uuid>",
-  "status": "COMPLETED",
-  "result_urls": {
-    "webp": "https://..."
-  }
-}
+```bash
+cp .env.example .env
+docker compose up -d --build
 ```
 
-For metadata-only jobs, `result_urls` is empty and metadata is available from `GET /api/jobs/{job_id}`.
+Services started locally:
+- `api`
+- `worker-standard`
+- `worker-ml`
+- `beat`
+- `postgres`
+- `redis`
+- `rabbitmq`
+- `localstack`
+- `migrate` (one-shot Alembic upgrade)
 
-## Configuration
+### Local endpoints
 
-Key environment variables:
+- App: `http://localhost:8000`
+- Docs: `http://localhost:8000/docs`
+- RabbitMQ UI: `http://localhost:15672`
 
-- `DATABASE_URL`
-- `REDIS_URL`
-- `RABBITMQ_URL`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `AWS_S3_BUCKET`
-- `AWS_ENDPOINT_URL` (set for LocalStack, unset for AWS)
-- `MAX_UPLOAD_BYTES`
-- `MAX_IMAGE_WIDTH`
-- `MAX_IMAGE_HEIGHT`
-- `PRESIGNED_URL_EXPIRY_SECONDS`
-- `JOB_RETENTION_HOURS`
-- `S3_RETENTION_DAYS`
-- `IDEMPOTENCY_TTL_SECONDS`
-- `WEBHOOK_CB_FAIL_THRESHOLD`
-- `WEBHOOK_CB_RESET_TIMEOUT`
+### Common commands
 
-See `.env.example` for baseline values.
+```bash
+docker compose ps
+docker compose logs -f api
+docker compose logs -f worker-standard
+docker compose run --rm migrate
+```
 
-## AWS Deployment Notes
+## Cloud Deployment (AWS, `us-east-1`)
 
-For AWS deployment:
+Infrastructure code lives in `infra/`.  
+Rendered manifests are generated from `k8s/` by `scripts/deploy/render-manifests.sh`.
 
-- Use RDS Postgres for `DATABASE_URL`.
-- Use ElastiCache Redis for `REDIS_URL`.
-- Use Amazon MQ (RabbitMQ) or managed RabbitMQ-compatible endpoint for `RABBITMQ_URL`.
-- Use S3 bucket for `AWS_S3_BUCKET`.
-- Leave `AWS_ENDPOINT_URL` empty.
-- Ensure IAM credentials permit S3 read/write, lifecycle config, and presigned URL flow.
+### Terraform baseline
 
-### Cloud Sprint Artifacts
+```bash
+cd infra
+terraform init -backend-config=backend.hcl
+terraform plan -var-file=dev.tfvars
+terraform apply -var-file=dev.tfvars
+```
 
-- Terraform scaffolding: `infra/`
-- K8s manifests: `k8s/`
-- Dev CD workflow: `.github/workflows/cd-dev.yaml`
-- Prod CD workflow: `.github/workflows/cd-prod.yaml`
-- Sprint plan: `cloud_sprint_plan.md`
+Important outputs:
+- `manifests_bucket_name`
+- `alb_security_group_id`
+- `ecr_api_repository_url`
+- `ecr_worker_repository_url`
 
-### GitHub Secrets Required For CD
+### GitHub Actions pipelines
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
+- `CI` (`.github/workflows/ci.yaml`)
+  - `ruff`
+  - `mypy`
+  - `pytest`
+  - Docker image build + Trivy scan
+  - `pip-audit` + `bandit` + Trivy FS scan
+
+- `CD-Dev` (`.github/workflows/cd-dev.yaml`)
+  - trigger: push to `main`
+  - build + push API/worker images to ECR
+  - render manifests with image digests + ingress values
+  - sync manifests to S3
+  - apply manifests on K3s node via SSM command
+  - run post-deploy smoke test (`/api/health`, then `POST /api/process`, then poll to completion)
+
+- `CD-Prod` (`.github/workflows/cd-prod.yaml`)
+  - manual trigger (`workflow_dispatch`)
+
+### Required GitHub secrets
+
+Set in the `dev` environment:
+- `AWS_DEPLOY_ROLE_ARN`
 - `MANIFEST_BUCKET`
-- `ALLOWED_INGRESS_CIDRS` (example: `203.0.113.10/32`)
-- `ALB_SECURITY_GROUP_ID` (from Terraform output)
+- `ALB_SECURITY_GROUP_ID`
+- `ALLOWED_INGRESS_CIDRS`
 
-## Development and Testing
+Optional temporary fallback (legacy auth):
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
 
-Install dependencies:
+For public demo access:
+- `ALLOWED_INGRESS_CIDRS=0.0.0.0/0`
 
-```bash
-pip install -r requirements-dev.txt
-```
+For `prod`, use the same secret names in the `prod` environment.
 
-Run API locally:
+### OIDC trust setup (required once)
 
-```bash
-uvicorn app.main:app --reload
-```
+Create an IAM role trusted by GitHub OIDC and use its ARN as `AWS_DEPLOY_ROLE_ARN`.
+At minimum, the role trust policy must allow:
+- provider: `token.actions.githubusercontent.com`
+- audience: `sts.amazonaws.com`
+- subject scoped to your repo/branch or environment (recommended)
 
-Run workers:
+### Deployment rollback
 
-```bash
-celery -A app.tasks.celery_app worker -Q default_queue --concurrency=5 --loglevel=info
-celery -A app.tasks.celery_app worker -Q ml_inference_queue --pool=solo --without-gossip --without-mingle --loglevel=info
-```
+Two practical rollback paths:
+1. Re-run a previous successful CD workflow run (previous commit state).
+2. Redeploy previous image digest by updating rendered manifest image references and re-applying.
 
-Run tests:
+## Security Notes
 
-```bash
-pytest -v --cov=app tests/
-```
+- Runtime secrets are sourced from SSM and injected into Kubernetes secrets/config at bootstrap.
+- ALB ingress CIDR is configurable (`ALLOWED_INGRESS_CIDRS`).
+- OpenAPI docs are intentionally public for portfolio/demo exploration.
+- `API_KEY` is provisioned and available in config, but route-level enforcement is intentionally not enabled in current demo flow.
 
-Optional static checks:
+## Repository Structure
 
-```bash
-ruff check app tests
-mypy app
+```text
+app/
+  routers/         FastAPI endpoints
+  services/        S3, idempotency, webhook, DAG builder
+  tasks/           Celery workers (image, metadata, archive, finalize, maintenance, ML)
+  static/          Frontend (HTML/CSS/JS)
+  ml/              DnCNN definition
+alembic/           Schema migrations
+infra/             Terraform IaC
+k8s/               Kubernetes manifests templates
+scripts/deploy/    Manifest rendering and SSM deploy helpers
+tests/             Unit/integration tests
 ```
 
 ## Troubleshooting
 
-Common local reset flow when schema/state is out of sync:
+### Frontend stuck on upload
+
+- Check browser console for JS errors.
+- Verify network call to `POST /api/process`.
+- Confirm backend health:
+  ```bash
+  curl http://<host>/api/health
+  ```
+
+### Job stuck in `PENDING`
+
+- Verify RabbitMQ and workers are up.
+- Check worker logs for task failures.
+- Confirm migrations are applied (`alembic upgrade head`).
+
+### Local reset
 
 ```bash
 docker compose down -v
@@ -269,8 +273,6 @@ docker compose up -d --build
 docker compose logs -f migrate
 ```
 
-If migrations succeed but app behavior is stale, restart API/workers and hard refresh the browser.
-
 ## License
 
-Internal project. All rights reserved.
+Internal/portfolio project.
