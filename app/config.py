@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # Notifications (optional)
     alert_email: str | None = None
 
+    # Observability
+    observability_enabled: bool = False
+    metrics_enabled: bool = True
+    otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    otel_service_name_api: str = "pixtools-api"
+    otel_service_name_worker: str = "pixtools-worker"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

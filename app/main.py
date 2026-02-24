@@ -12,6 +12,7 @@ from app.database import engine
 from app.logging_config import setup_logging
 from app.middleware import register_request_id_middleware
 from app.models import Base
+from app.observability import setup_api_observability
 
 # Initialize structured logging globally
 setup_logging()
@@ -61,6 +62,9 @@ def create_app() -> FastAPI:
 
     application.include_router(jobs_router, prefix="/api")
     application.include_router(health_router, prefix="/api")
+
+    # --- Observability ---
+    setup_api_observability(application)
 
     # --- Mount static frontend ---
     if STATIC_DIR.exists():

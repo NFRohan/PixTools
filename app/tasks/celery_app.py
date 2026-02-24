@@ -6,6 +6,7 @@ from celery.schedules import crontab
 from kombu import Exchange, Queue
 
 from app.config import settings
+from app.observability import setup_celery_observability
 
 # --- Celery App ---
 celery_app = Celery(
@@ -80,6 +81,9 @@ celery_app.conf.result_serializer = "json"
 celery_app.conf.task_time_limit = 300  # hard kill after 300s (5m)
 celery_app.conf.task_soft_time_limit = 290  # raise SoftTimeLimitExceeded at 290s
 celery_app.conf.task_default_retry_delay = 5  # 5s between retries
+
+# --- Observability ---
+setup_celery_observability()
 
 # --- Import task modules so they register with the app ---
 # --- Logging & Correlation ID propagation ---
