@@ -153,6 +153,24 @@ variable "grafana_cloud_stack_id" {
   default     = ""
 }
 
+variable "grafana_cloud_logs_user" {
+  description = "Grafana Cloud Loki basic-auth username override. Falls back to grafana_cloud_stack_id when empty."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_cloud_metrics_user" {
+  description = "Grafana Cloud Prometheus basic-auth username override. Falls back to grafana_cloud_stack_id when empty."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_cloud_traces_user" {
+  description = "Grafana Cloud OTLP basic-auth username override. Falls back to grafana_cloud_stack_id when empty."
+  type        = string
+  default     = ""
+}
+
 variable "grafana_cloud_api_key" {
   description = "Grafana Cloud API key/token with logs/metrics/traces ingest scopes."
   type        = string

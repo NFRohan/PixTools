@@ -13,6 +13,9 @@ manifest_s3_prefix = "manifests/dev"
 
 # Grafana Cloud integration (Alloy exporter targets).
 # grafana_cloud_stack_id    = "123456"
+# grafana_cloud_logs_user   = "123456" # optional override
+# grafana_cloud_metrics_user = "123456" # optional override
+# grafana_cloud_traces_user = "123456" # optional override
 # grafana_cloud_api_key     = "glc_..."
 # grafana_cloud_logs_url    = "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
 # grafana_cloud_metrics_url = "https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"

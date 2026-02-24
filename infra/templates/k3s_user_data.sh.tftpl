@@ -82,6 +82,9 @@ RABBITMQ_URL="$(get_param "${ssm_prefix}/rabbitmq_url")"
 AWS_S3_BUCKET="$(get_param "${ssm_prefix}/aws_s3_bucket")"
 API_KEY="$(get_param "${ssm_prefix}/api_key")"
 GRAFANA_CLOUD_STACK_ID="$(get_param_optional "${ssm_prefix}/grafana_cloud_stack_id")"
+GRAFANA_CLOUD_LOGS_USER="$(get_param_optional "${ssm_prefix}/grafana_cloud_logs_user")"
+GRAFANA_CLOUD_METRICS_USER="$(get_param_optional "${ssm_prefix}/grafana_cloud_metrics_user")"
+GRAFANA_CLOUD_TRACES_USER="$(get_param_optional "${ssm_prefix}/grafana_cloud_traces_user")"
 GRAFANA_CLOUD_API_KEY="$(get_param_optional "${ssm_prefix}/grafana_cloud_api_key")"
 GRAFANA_CLOUD_LOGS_URL="$(get_param_optional "${ssm_prefix}/grafana_cloud_logs_url")"
 GRAFANA_CLOUD_METRICS_URL="$(get_param_optional "${ssm_prefix}/grafana_cloud_metrics_url")"
@@ -91,6 +94,16 @@ RABBITMQ_PASSWORD="$(get_param "${ssm_prefix}/rabbitmq_password")"
 IDEMPOTENCY_TTL_SECONDS="$(get_param "${ssm_prefix}/idempotency_ttl_seconds")"
 WEBHOOK_CB_FAIL_THRESHOLD="$(get_param "${ssm_prefix}/webhook_cb_fail_threshold")"
 WEBHOOK_CB_RESET_TIMEOUT="$(get_param "${ssm_prefix}/webhook_cb_reset_timeout")"
+
+if [ -z "$${GRAFANA_CLOUD_LOGS_USER}" ]; then
+  GRAFANA_CLOUD_LOGS_USER="$${GRAFANA_CLOUD_STACK_ID}"
+fi
+if [ -z "$${GRAFANA_CLOUD_METRICS_USER}" ]; then
+  GRAFANA_CLOUD_METRICS_USER="$${GRAFANA_CLOUD_STACK_ID}"
+fi
+if [ -z "$${GRAFANA_CLOUD_TRACES_USER}" ]; then
+  GRAFANA_CLOUD_TRACES_USER="$${GRAFANA_CLOUD_STACK_ID}"
+fi
 
 kubectl create namespace pixtools --dry-run=client -o yaml | kubectl apply -f -
 
@@ -122,6 +135,9 @@ kubectl -n pixtools create secret generic rabbitmq-auth \
 
 kubectl -n pixtools create secret generic grafana-cloud \
   --from-literal=stack_id="$${GRAFANA_CLOUD_STACK_ID}" \
+  --from-literal=logs_user="$${GRAFANA_CLOUD_LOGS_USER}" \
+  --from-literal=metrics_user="$${GRAFANA_CLOUD_METRICS_USER}" \
+  --from-literal=traces_user="$${GRAFANA_CLOUD_TRACES_USER}" \
   --from-literal=api_key="$${GRAFANA_CLOUD_API_KEY}" \
   --from-literal=logs_url="$${GRAFANA_CLOUD_LOGS_URL}" \
   --from-literal=metrics_url="$${GRAFANA_CLOUD_METRICS_URL}" \

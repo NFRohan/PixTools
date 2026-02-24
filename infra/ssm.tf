@@ -94,6 +94,33 @@ resource "aws_ssm_parameter" "grafana_cloud_stack_id" {
   value = var.grafana_cloud_stack_id
 }
 
+resource "aws_ssm_parameter" "grafana_cloud_logs_user" {
+  count = var.grafana_cloud_logs_user != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_logs_user"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_logs_user
+}
+
+resource "aws_ssm_parameter" "grafana_cloud_metrics_user" {
+  count = var.grafana_cloud_metrics_user != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_metrics_user"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_metrics_user
+}
+
+resource "aws_ssm_parameter" "grafana_cloud_traces_user" {
+  count = var.grafana_cloud_traces_user != "" ? 1 : 0
+
+  name  = "${local.ssm_prefix}/grafana_cloud_traces_user"
+  type  = "String"
+  tier  = "Standard"
+  value = var.grafana_cloud_traces_user
+}
+
 resource "aws_ssm_parameter" "grafana_cloud_api_key" {
   count = var.grafana_cloud_api_key != "" ? 1 : 0
 

@@ -78,6 +78,21 @@ output "grafana_cloud_stack_id_parameter" {
   value       = try(aws_ssm_parameter.grafana_cloud_stack_id[0].name, null)
 }
 
+output "grafana_cloud_logs_user_parameter" {
+  description = "SSM parameter name storing Grafana Cloud logs username override."
+  value       = try(aws_ssm_parameter.grafana_cloud_logs_user[0].name, null)
+}
+
+output "grafana_cloud_metrics_user_parameter" {
+  description = "SSM parameter name storing Grafana Cloud metrics username override."
+  value       = try(aws_ssm_parameter.grafana_cloud_metrics_user[0].name, null)
+}
+
+output "grafana_cloud_traces_user_parameter" {
+  description = "SSM parameter name storing Grafana Cloud traces username override."
+  value       = try(aws_ssm_parameter.grafana_cloud_traces_user[0].name, null)
+}
+
 output "grafana_cloud_api_key_parameter" {
   description = "SSM parameter name storing Grafana Cloud API key."
   value       = try(aws_ssm_parameter.grafana_cloud_api_key[0].name, null)
