@@ -82,6 +82,7 @@ flowchart LR
 - Monitoring and alerting:
   - CloudWatch alarms for ALB 5XX, ASG in-service count, and RDS CPU/free storage
   - SNS topic for alarm fan-out (optional email subscription)
+  - Lightweight Alloy collector shipping logs/metrics/traces to Grafana Cloud
 
 ## API Contract
 
@@ -182,6 +183,31 @@ Important outputs:
 - `alb_security_group_id`
 - `ecr_api_repository_url`
 - `ecr_worker_repository_url`
+- `grafana_cloud_stack_id_parameter`
+- `grafana_cloud_api_key_parameter`
+- `grafana_cloud_logs_url_parameter`
+- `grafana_cloud_metrics_url_parameter`
+- `grafana_cloud_traces_url_parameter`
+
+### Monitoring access
+
+Grafana UI is hosted in Grafana Cloud (not on the K3s node).  
+The cluster runs only a lightweight Alloy collector.
+
+Grafana Cloud ingest settings are stored in SSM Parameter Store:
+
+```bash
+aws ssm get-parameter \
+  --name "/pixtools/dev/grafana_cloud_stack_id" \
+  --query "Parameter.Value" \
+  --output text
+
+aws ssm get-parameter \
+  --name "/pixtools/dev/grafana_cloud_api_key" \
+  --with-decryption \
+  --query "Parameter.Value" \
+  --output text
+```
 
 ### GitHub Actions pipelines
 
@@ -269,6 +295,18 @@ tests/             Unit/integration tests
 - Verify RabbitMQ and workers are up.
 - Check worker logs for task failures.
 - Confirm migrations are applied (`alembic upgrade head`).
+
+### Monitoring pods not ready
+
+- Check monitoring workloads:
+  ```bash
+  kubectl -n pixtools get pods | grep alloy
+  ```
+- Check Alloy health:
+  ```bash
+  kubectl -n pixtools port-forward deploy/alloy 12345:12345
+  curl http://localhost:12345/-/ready
+  ```
 
 ### Local reset
 

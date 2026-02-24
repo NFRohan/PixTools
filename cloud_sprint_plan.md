@@ -68,7 +68,7 @@ Use these defaults unless explicitly overridden during sprint execution.
 ### Observability Baseline
 - Structured JSON logs shipped to CloudWatch Logs
 - CloudWatch log retention: 14 days
-- Prometheus + Grafana in-cluster for service metrics
+- Grafana Cloud with lightweight in-cluster Alloy collector (no local Mimir/Loki/Tempo)
 - Minimum alert set: API health check failing 5m, queue depth above threshold 10m, worker count zero, RDS CPU > 80% for 10m
 
 ---
@@ -188,7 +188,7 @@ Goal: Create a real cloud release path from commit to deployable artifact.
 7. Observability sequencing (LGTM)
 - Do not block cloud rollout on full LGTM stack.
 - Phase 1 (`Sprint 1-2`): CloudWatch logs + existing metrics baseline.
-- Phase 2 (`Sprint 4+`): introduce Loki/Grafana/Tempo/Mimir with trace correlation.
+- Phase 2 (`Sprint 4+`): Alloy + OpenTelemetry shipping to Grafana Cloud with trace correlation.
 
 ### Acceptance Criteria
 - `main` push produces image in ECR

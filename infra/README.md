@@ -37,8 +37,10 @@ terraform apply -var-file=dev.tfvars
 - RDS is single-AZ `db.t4g.micro`.
 - K3s uses external datastore in RDS (`k3s_state` DB).
 - Manifests are pulled from S3 prefix `manifests/dev`.
+- Bootstrap pulls runtime secrets from SSM, including Grafana Cloud ingest credentials.
 - Monitoring creates:
   - SNS topic for alerts
   - ALB 5XX CloudWatch alarm (auto-discovered ALB by Kubernetes tags)
   - ASG in-service instance alarm
   - RDS CPU and free-storage alarms
+  - Lightweight Alloy collector deployment via manifests (`k8s/monitoring/*`)
