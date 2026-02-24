@@ -202,10 +202,6 @@ Set in the `dev` environment:
 - `ALB_SECURITY_GROUP_ID`
 - `ALLOWED_INGRESS_CIDRS`
 
-Optional temporary fallback (legacy auth):
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-
 For public demo access:
 - `ALLOWED_INGRESS_CIDRS=0.0.0.0/0`
 
