@@ -38,6 +38,21 @@ spec:
                 secretKeyRef:
                   name: grafana-cloud
                   key: stack_id
+            - name: GRAFANA_CLOUD_LOGS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: logs_user
+            - name: GRAFANA_CLOUD_METRICS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: metrics_user
+            - name: GRAFANA_CLOUD_TRACES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud
+                  key: traces_user
             - name: GRAFANA_CLOUD_API_KEY
               valueFrom:
                 secretKeyRef:

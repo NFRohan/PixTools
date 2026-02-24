@@ -11,7 +11,7 @@ data:
     }
 
     otelcol.auth.basic "grafana_cloud" {
-      username = sys.env("GRAFANA_CLOUD_STACK_ID")
+      username = sys.env("GRAFANA_CLOUD_TRACES_USER")
       password = sys.env("GRAFANA_CLOUD_API_KEY")
     }
 
@@ -54,7 +54,7 @@ data:
       endpoint {
         url = sys.env("GRAFANA_CLOUD_METRICS_URL")
         basic_auth {
-          username = sys.env("GRAFANA_CLOUD_STACK_ID")
+          username = sys.env("GRAFANA_CLOUD_METRICS_USER")
           password = sys.env("GRAFANA_CLOUD_API_KEY")
         }
       }
@@ -68,7 +68,7 @@ data:
       endpoint {
         url = sys.env("GRAFANA_CLOUD_LOGS_URL")
         basic_auth {
-          username = sys.env("GRAFANA_CLOUD_STACK_ID")
+          username = sys.env("GRAFANA_CLOUD_LOGS_USER")
           password = sys.env("GRAFANA_CLOUD_API_KEY")
         }
       }
