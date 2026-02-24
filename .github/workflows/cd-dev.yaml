@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   deploy-dev:
@@ -25,7 +26,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: pixtools-dev-cd
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure AWS credentials (access key fallback)
+        if: ${{ secrets.AWS_DEPLOY_ROLE_ARN == '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -100,3 +110,59 @@ jobs:
       - name: Post-deploy pod status
         run: |
           scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "kubectl -n pixtools get pods -o wide"
+
+      - name: Resolve ALB hostname from ingress
+        id: ingress
+        run: |
+          ALB_HOST="$(scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "kubectl -n pixtools get ingress pixtools -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" | tr -d '\r\n' | xargs)"
+          if [ -z "${ALB_HOST}" ] || [[ "${ALB_HOST}" != *.elb.amazonaws.com ]]; then
+            echo "Failed to resolve ALB hostname from ingress." >&2
+            exit 1
+          fi
+          echo "alb_host=${ALB_HOST}" >> "$GITHUB_OUTPUT"
+
+      - name: Post-deploy smoke test
+        env:
+          BASE_URL: http://${{ steps.ingress.outputs.alb_host }}
+        run: |
+          set -euo pipefail
+          echo "Smoke testing ${BASE_URL}"
+
+          for i in {1..30}; do
+            if curl -fsS "${BASE_URL}/api/health" >/dev/null; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Health check did not become ready in time." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          PROCESS_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/api/process" \
+            -H "Idempotency-Key: smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            -F "file=@test_image.png;type=image/png" \
+            -F "operations=[\"webp\"]")"
+
+          JOB_ID="$(python -c "import json,sys; print(json.loads(sys.stdin.read())['job_id'])" <<<"${PROCESS_RESPONSE}")"
+          if [ -z "${JOB_ID}" ]; then
+            echo "Failed to parse job_id from response: ${PROCESS_RESPONSE}" >&2
+            exit 1
+          fi
+
+          for i in {1..60}; do
+            JOB_RESPONSE="$(curl -fsS "${BASE_URL}/api/jobs/${JOB_ID}")"
+            STATUS="$(python -c "import json,sys; print(json.loads(sys.stdin.read())['status'])" <<<"${JOB_RESPONSE}")"
+            if [ "${STATUS}" = "COMPLETED" ] || [ "${STATUS}" = "COMPLETED_WEBHOOK_FAILED" ]; then
+              echo "Smoke job ${JOB_ID} completed with status ${STATUS}"
+              exit 0
+            fi
+            if [ "${STATUS}" = "FAILED" ]; then
+              echo "Smoke job ${JOB_ID} failed: ${JOB_RESPONSE}" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Smoke job ${JOB_ID} timed out." >&2
+          exit 1

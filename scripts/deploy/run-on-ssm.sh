@@ -22,7 +22,7 @@ COMMAND_ID="$(
     --output text
 )"
 
-echo "Sent command ${COMMAND_ID} to ${INSTANCE_ID}"
+echo "Sent command ${COMMAND_ID} to ${INSTANCE_ID}" >&2
 
 for _ in {1..120}; do
   STATUS="$(
