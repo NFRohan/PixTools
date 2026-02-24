@@ -79,6 +79,9 @@ flowchart LR
 - Frontend processing safeguards:
   - request timeout handling
   - robust idempotency key generation even when `crypto.randomUUID()` is unavailable
+- Monitoring and alerting:
+  - CloudWatch alarms for ALB 5XX, ASG in-service count, and RDS CPU/free storage
+  - SNS topic for alarm fan-out (optional email subscription)
 
 ## API Contract
 
