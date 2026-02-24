@@ -184,6 +184,9 @@ Important outputs:
 - `ecr_api_repository_url`
 - `ecr_worker_repository_url`
 - `grafana_cloud_stack_id_parameter`
+- `grafana_cloud_logs_user_parameter`
+- `grafana_cloud_metrics_user_parameter`
+- `grafana_cloud_traces_user_parameter`
 - `grafana_cloud_api_key_parameter`
 - `grafana_cloud_logs_url_parameter`
 - `grafana_cloud_metrics_url_parameter`
@@ -208,6 +211,13 @@ aws ssm get-parameter \
   --query "Parameter.Value" \
   --output text
 ```
+
+Optional per-signal username overrides:
+- `/pixtools/dev/grafana_cloud_logs_user`
+- `/pixtools/dev/grafana_cloud_metrics_user`
+- `/pixtools/dev/grafana_cloud_traces_user`
+
+If unset, deploy logic falls back to `/pixtools/dev/grafana_cloud_stack_id`.
 
 ### GitHub Actions pipelines
 
