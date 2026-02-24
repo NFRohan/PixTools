@@ -45,14 +45,15 @@ def setup_api_observability(app: FastAPI) -> None:
             _httpx_instrumented = True
         _api_instrumented = True
 
-    if settings.metrics_enabled:
-        if not any(getattr(route, "path", None) == "/metrics" for route in app.routes):
-            Instrumentator().instrument(app).expose(
-                app,
-                endpoint="/metrics",
-                include_in_schema=False,
-            )
-            logger.info("Prometheus /metrics endpoint exposed")
+    if settings.metrics_enabled and not any(
+        getattr(route, "path", None) == "/metrics" for route in app.routes
+    ):
+        Instrumentator().instrument(app).expose(
+            app,
+            endpoint="/metrics",
+            include_in_schema=False,
+        )
+        logger.info("Prometheus /metrics endpoint exposed")
 
 
 def setup_celery_observability() -> None:
