@@ -9,6 +9,7 @@ fi
 INSTANCE_ID="$1"
 COMMAND="$2"
 REGION="${AWS_REGION:-us-east-1}"
+PARAMETERS_JSON="$(jq -cn --arg cmd "${COMMAND}" '{commands: [$cmd]}')"
 
 COMMAND_ID="$(
   aws ssm send-command \
@@ -16,7 +17,7 @@ COMMAND_ID="$(
     --instance-ids "${INSTANCE_ID}" \
     --document-name "AWS-RunShellScript" \
     --comment "PixTools deployment command" \
-    --parameters "commands=${COMMAND}" \
+    --parameters "${PARAMETERS_JSON}" \
     --query "Command.CommandId" \
     --output text
 )"
@@ -64,4 +65,3 @@ done
 
 echo "Timed out waiting for SSM command completion" >&2
 exit 1
-
