@@ -24,6 +24,51 @@ COMMAND_ID="$(
 
 echo "Sent command ${COMMAND_ID} to ${INSTANCE_ID}" >&2
 
+get_invocation_json() {
+  aws ssm get-command-invocation \
+    --region "${REGION}" \
+    --command-id "${COMMAND_ID}" \
+    --instance-id "${INSTANCE_ID}" \
+    --output json 2>/dev/null || true
+}
+
+print_failure_details() {
+  local invocation_json
+  local status_details
+  local response_code
+  local stdout_content
+  local stderr_content
+
+  invocation_json="$(get_invocation_json)"
+  status_details="$(jq -r '.StatusDetails // empty' <<<"${invocation_json}")"
+  response_code="$(jq -r '.ResponseCode // empty' <<<"${invocation_json}")"
+  stdout_content="$(jq -r '.StandardOutputContent // ""' <<<"${invocation_json}")"
+  stderr_content="$(jq -r '.StandardErrorContent // ""' <<<"${invocation_json}")"
+
+  if [[ -n "${status_details}" ]]; then
+    echo "StatusDetails: ${status_details}" >&2
+  fi
+  if [[ -n "${response_code}" && "${response_code}" != "None" ]]; then
+    echo "ResponseCode: ${response_code}" >&2
+  fi
+
+  if [[ -n "${stderr_content}" ]]; then
+    echo "----- SSM STDERR -----" >&2
+    echo "${stderr_content}" >&2
+  fi
+  if [[ -n "${stdout_content}" ]]; then
+    echo "----- SSM STDOUT -----" >&2
+    echo "${stdout_content}" >&2
+  fi
+
+  aws ssm list-command-invocations \
+    --region "${REGION}" \
+    --command-id "${COMMAND_ID}" \
+    --details \
+    --query "CommandInvocations[0].CommandPlugins[].{Name:Name,Status:Status,ResponseCode:ResponseCode}" \
+    --output table >&2 || true
+}
+
 for _ in {1..120}; do
   STATUS="$(
     aws ssm get-command-invocation \
@@ -46,12 +91,7 @@ for _ in {1..120}; do
       ;;
     Failed|TimedOut|Cancelled|Cancelling)
       echo "Command failed with status: ${STATUS}" >&2
-      aws ssm get-command-invocation \
-        --region "${REGION}" \
-        --command-id "${COMMAND_ID}" \
-        --instance-id "${INSTANCE_ID}" \
-        --query "StandardErrorContent" \
-        --output text >&2 || true
+      print_failure_details
       exit 1
       ;;
     InProgress|Pending|Delayed|"")
@@ -64,4 +104,5 @@ for _ in {1..120}; do
 done
 
 echo "Timed out waiting for SSM command completion" >&2
+print_failure_details
 exit 1

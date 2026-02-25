@@ -98,19 +98,37 @@ jobs:
           chmod +x scripts/deploy/run-on-ssm.sh
           REMOTE_CMD="$(cat <<EOF
           set -euo pipefail
+          dump_debug() {
+            kubectl -n pixtools get pods -o wide || true
+            kubectl -n pixtools get events --sort-by=.metadata.creationTimestamp | tail -n 120 || true
+          }
+
           mkdir -p /opt/pixtools/manifests
           aws s3 sync s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX} /opt/pixtools/manifests --delete
+
           if [ -f /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh ]; then
             chmod +x /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
-            AWS_REGION=${AWS_REGION} \
+            if ! AWS_REGION=${AWS_REGION} \
               PROJECT=pixtools \
               ENVIRONMENT=${ENVIRONMENT} \
               MANIFEST_BUCKET=${MANIFEST_BUCKET} \
               MANIFEST_PREFIX=${MANIFEST_PREFIX} \
               NAMESPACE=pixtools \
-              /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+              /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh; then
+              dump_debug
+              exit 1
+            fi
           else
-            find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -n 1 kubectl apply -f
+            if find /opt/pixtools/manifests -type f -name '*.yaml' -print -quit | grep -q .; then
+              if ! find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -r -n 1 kubectl apply -f; then
+                dump_debug
+                exit 1
+              fi
+            else
+              echo "No manifest YAML files found at /opt/pixtools/manifests" >&2
+              dump_debug
+              exit 1
+            fi
           fi
           EOF
           )"
