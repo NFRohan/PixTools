@@ -198,13 +198,11 @@ label_cluster_nodes() {
   log "Labeling cluster nodes for app/infra placement"
 
   local -a live_nodes=()
-  local -a infra_nodes=()
-  local -a app_nodes=()
   local node_found=false
 
   while IFS=$'\t' read -r node_name provider_id; do
     local instance_id=""
-    local instance_state metadata lifecycle name_tag asg_name
+    local instance_state
 
     [[ -z "${node_name}" ]] && continue
 
@@ -229,27 +227,6 @@ label_cluster_nodes() {
 
     live_nodes+=("${node_name}")
     node_found=true
-
-    if [[ -z "${instance_id}" ]]; then
-      continue
-    fi
-
-    metadata="$(
-      aws ec2 describe-instances \
-        --region "${AWS_REGION}" \
-        --instance-ids "${instance_id}" \
-        --query "Reservations[0].Instances[0].[InstanceLifecycle,Tags[?Key=='Name']|[0].Value,Tags[?Key=='aws:autoscaling:groupName']|[0].Value]" \
-        --output text
-    )"
-    read -r lifecycle name_tag asg_name <<<"${metadata}"
-
-    if [[ "${name_tag}" == *"infra"* || "${asg_name}" == *"infra"* || "${lifecycle}" == "None" ]]; then
-      infra_nodes+=("${node_name}")
-    fi
-
-    if [[ "${name_tag}" == *"app"* || "${asg_name}" == *"app"* || "${lifecycle}" == "spot" ]]; then
-      app_nodes+=("${node_name}")
-    fi
   done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // "")] | @tsv')
 
   if [[ "${node_found}" != "true" || "${#live_nodes[@]}" -eq 0 ]]; then
@@ -266,26 +243,18 @@ label_cluster_nodes() {
     return 1
   fi
 
-  if [[ "${#infra_nodes[@]}" -eq 0 ]]; then
-    infra_nodes+=("${live_nodes[0]}")
-  fi
-  if [[ "${#app_nodes[@]}" -eq 0 ]]; then
-    app_nodes+=("${live_nodes[0]}")
-  fi
-
+  # Default to shared-node placement in demo environments. This avoids hard
+  # scheduling failures during node re-registration or single-node operation.
   for node in "${live_nodes[@]}"; do
-    kubectl label node "${node}" pixtools-workload-infra- pixtools-workload-app- >/dev/null 2>&1 || true
+    kubectl label node "${node}" \
+      pixtools-workload-infra=true \
+      pixtools-workload-app=true \
+      --overwrite >/dev/null
   done
 
-  for node in "${infra_nodes[@]}"; do
-    kubectl label node "${node}" pixtools-workload-infra=true --overwrite >/dev/null
-  done
-  for node in "${app_nodes[@]}"; do
-    kubectl label node "${node}" pixtools-workload-app=true --overwrite >/dev/null
-  done
-
-  log "Infra nodes: ${infra_nodes[*]}"
-  log "App nodes: ${app_nodes[*]}"
+  log "Infra nodes: ${live_nodes[*]}"
+  log "App nodes: ${live_nodes[*]}"
+  kubectl get nodes -L pixtools-workload-infra,pixtools-workload-app || true
 }
 
 apply_manifests() {
