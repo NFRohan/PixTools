@@ -65,6 +65,12 @@ print_failure_details() {
 
 }
 
+cancel_inflight_command() {
+  aws ssm cancel-command \
+    --region "${REGION}" \
+    --command-id "${COMMAND_ID}" >/dev/null 2>&1 || true
+}
+
 if ! [[ "${WAIT_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || (( WAIT_TIMEOUT_SECONDS <= 0 )); then
   echo "Invalid SSM_WAIT_TIMEOUT_SECONDS: ${WAIT_TIMEOUT_SECONDS}" >&2
   exit 1
@@ -120,5 +126,8 @@ while (( elapsed < WAIT_TIMEOUT_SECONDS )); do
 done
 
 echo "Timed out waiting for SSM command completion after ${WAIT_TIMEOUT_SECONDS}s" >&2
+echo "Attempting to cancel SSM command ${COMMAND_ID}" >&2
+cancel_inflight_command
+sleep 3
 print_failure_details
 exit 1

@@ -86,7 +86,7 @@ jobs:
       - name: Deploy manifests via SSM command
         env:
           MANIFEST_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
-          SSM_WAIT_TIMEOUT_SECONDS: "3300"
+          SSM_WAIT_TIMEOUT_SECONDS: "2100"
         run: |
           INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
           chmod +x scripts/deploy/run-on-ssm.sh
