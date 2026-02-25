@@ -197,26 +197,14 @@ sync_runtime_materialized_config() {
 label_cluster_nodes() {
   log "Labeling cluster nodes for app/infra placement"
 
-  local running_ids
   local -a live_nodes=()
   local -a infra_nodes=()
   local -a app_nodes=()
-
-  running_ids="$(
-    aws ec2 describe-instances \
-      --region "${AWS_REGION}" \
-      --filters "Name=tag:Project,Values=${PROJECT}" "Name=tag:Environment,Values=${ENVIRONMENT}" "Name=instance-state-name,Values=running" \
-      --query "Reservations[].Instances[].InstanceId" \
-      --output text
-  )"
-  if [[ -z "${running_ids// }" ]]; then
-    log "No running instances matched Project/Environment tags; stale-node deletion is disabled for this run"
-  fi
-  running_ids=" ${running_ids} "
+  local node_found=false
 
   while IFS=$'\t' read -r node_name provider_id; do
     local instance_id=""
-    local metadata lifecycle name_tag asg_name
+    local instance_state metadata lifecycle name_tag asg_name
 
     [[ -z "${node_name}" ]] && continue
 
@@ -224,13 +212,23 @@ label_cluster_nodes() {
       instance_id="${provider_id##*/}"
     fi
 
-    if [[ -n "${running_ids// }" && -n "${instance_id}" && "${running_ids}" != *" ${instance_id} "* ]]; then
-      log "Deleting stale kubernetes node object ${node_name} (instance ${instance_id} no longer running)"
-      kubectl delete node "${node_name}" --ignore-not-found=true >/dev/null || true
-      continue
+    if [[ -n "${instance_id}" ]]; then
+      instance_state="$(
+        aws ec2 describe-instances \
+          --region "${AWS_REGION}" \
+          --instance-ids "${instance_id}" \
+          --query "Reservations[0].Instances[0].State.Name" \
+          --output text 2>/dev/null || true
+      )"
+      if [[ "${instance_state}" != "running" && "${instance_state}" != "pending" ]]; then
+        log "Deleting stale kubernetes node object ${node_name} (instance ${instance_id} state=${instance_state:-unknown})"
+        kubectl delete node "${node_name}" --ignore-not-found=true >/dev/null || true
+        continue
+      fi
     fi
 
     live_nodes+=("${node_name}")
+    node_found=true
 
     if [[ -z "${instance_id}" ]]; then
       continue
@@ -253,6 +251,15 @@ label_cluster_nodes() {
       app_nodes+=("${node_name}")
     fi
   done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // "")] | @tsv')
+
+  if [[ "${node_found}" != "true" || "${#live_nodes[@]}" -eq 0 ]]; then
+    # Node registration can lag briefly after k3s restart.
+    if wait_for_nodes 60; then
+      while IFS=$'\t' read -r node_name _; do
+        [[ -n "${node_name}" ]] && live_nodes+=("${node_name}")
+      done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // "")] | @tsv')
+    fi
+  fi
 
   if [[ "${#live_nodes[@]}" -eq 0 ]]; then
     log "No live nodes found in cluster"
