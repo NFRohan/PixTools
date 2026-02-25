@@ -61,12 +61,6 @@ print_failure_details() {
     echo "${stdout_content}" >&2
   fi
 
-  aws ssm list-command-invocations \
-    --region "${REGION}" \
-    --command-id "${COMMAND_ID}" \
-    --details \
-    --query "CommandInvocations[0].CommandPlugins[].{Name:Name,Status:Status,ResponseCode:ResponseCode}" \
-    --output table >&2 || true
 }
 
 for _ in {1..120}; do

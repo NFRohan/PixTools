@@ -9,6 +9,7 @@ MANIFEST_PREFIX="${MANIFEST_PREFIX:?MANIFEST_PREFIX is required}"
 NAMESPACE="${NAMESPACE:-pixtools}"
 MANIFEST_DIR="${MANIFEST_DIR:-/opt/pixtools/manifests}"
 SSM_PREFIX="/${PROJECT}/${ENVIRONMENT}"
+export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 log() {
   printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*"
@@ -37,6 +38,45 @@ normalize_url() {
   # Guard against accidental "grafana.net./otlp" style URLs.
   value="${value//.net.\//.net/}"
   printf '%s' "${value}"
+}
+
+node_count() {
+  kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' '
+}
+
+wait_for_nodes() {
+  local timeout_seconds="${1:-120}"
+  local elapsed=0
+  local count=0
+
+  while (( elapsed < timeout_seconds )); do
+    count="$(node_count)"
+    if [[ "${count}" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+      return 0
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+
+  return 1
+}
+
+ensure_cluster_has_nodes() {
+  if wait_for_nodes 60; then
+    return 0
+  fi
+
+  log "No nodes registered yet; restarting k3s service to recover control-plane/agent state"
+  systemctl restart k3s || true
+
+  if wait_for_nodes 180; then
+    return 0
+  fi
+
+  log "Cluster still has zero registered nodes after restart"
+  systemctl --no-pager --full status k3s || true
+  journalctl -u k3s -n 120 --no-pager || true
+  return 1
 }
 
 sync_manifests() {
@@ -318,6 +358,7 @@ main() {
   sync_manifests
   refresh_ecr_pull_secret
   sync_runtime_materialized_config
+  ensure_cluster_has_nodes
   label_cluster_nodes
   apply_manifests
   recover_rabbitmq_volume_affinity_if_needed
