@@ -295,14 +295,14 @@ apply_manifests() {
 
 recover_rabbitmq_volume_affinity_if_needed() {
   if ! kubectl -n "${NAMESPACE}" get pod rabbitmq-0 >/dev/null 2>&1; then
-    return 0
+    return 1
   fi
 
   local pod_description
   pod_description="$(kubectl -n "${NAMESPACE}" describe pod rabbitmq-0 2>/dev/null || true)"
 
   if ! grep -Eqi "volume node affinity conflict|PersistentVolume.?s node affinity|didn't match PersistentVolume" <<<"${pod_description}"; then
-    return 0
+    return 1
   fi
 
   log "RabbitMQ has a volume node affinity conflict; recreating claim and volume"
@@ -320,6 +320,7 @@ recover_rabbitmq_volume_affinity_if_needed() {
 
   kubectl apply -f "${MANIFEST_DIR}/rabbitmq/service.yaml"
   kubectl apply -f "${MANIFEST_DIR}/rabbitmq/statefulset.yaml"
+  return 0
 }
 
 prune_pending_pods() {
@@ -372,16 +373,31 @@ rollout_with_retry() {
   kubectl -n "${NAMESPACE}" rollout status "${kind}/${name}" --timeout="${timeout_retry}"
 }
 
+rollout_rabbitmq_with_recovery() {
+  local timeout_primary="${1:-120s}"
+  local timeout_recovery="${2:-300s}"
+
+  if kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout="${timeout_primary}"; then
+    return 0
+  fi
+
+  log "RabbitMQ rollout timed out; checking for PV node-affinity mismatch"
+  if recover_rabbitmq_volume_affinity_if_needed; then
+    log "RabbitMQ PV/PVC recreated; retrying rollout"
+  else
+    log "No RabbitMQ PV affinity mismatch detected; pruning Pending pods before retry"
+    prune_pending_pods
+  fi
+
+  kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout="${timeout_recovery}"
+}
+
 wait_for_rollouts() {
   log "Waiting for core workload rollouts"
   relax_selectors_for_single_node
   prune_pending_pods
   rollout_with_retry deployment redis 180s 420s
-  if ! rollout_with_retry statefulset rabbitmq 180s 420s; then
-    log "RabbitMQ rollout timed out; retrying after affinity recovery"
-    recover_rabbitmq_volume_affinity_if_needed
-    rollout_with_retry statefulset rabbitmq 240s 420s
-  fi
+  rollout_rabbitmq_with_recovery 120s 300s
   rollout_with_retry deployment pixtools-api 300s 600s
   rollout_with_retry deployment pixtools-worker-standard 300s 600s
   rollout_with_retry deployment pixtools-worker-ml 300s 600s
