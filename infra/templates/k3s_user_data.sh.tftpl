@@ -19,6 +19,12 @@ K3S_DB="${k3s_db_name}"
 
 echo "Starting bootstrap for ${cluster_name} in ${aws_region}"
 
+# Ensure SSM agent is present/active before long bootstrap tasks so the node
+# becomes remotely manageable quickly for CD/ops workflows.
+yum install -y amazon-ssm-agent || true
+systemctl enable amazon-ssm-agent || true
+systemctl restart amazon-ssm-agent || systemctl start amazon-ssm-agent || true
+
 yum update -y
 # Amazon Linux 2023 ships curl-minimal by default; installing curl conflicts and breaks bootstrap.
 yum install -y jq unzip tar awscli postgresql15
