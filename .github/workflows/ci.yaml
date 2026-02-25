@@ -65,6 +65,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Install Trivy CLI
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          for attempt in 1 2 3; do
+            if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+              | sh -s -- -b "$HOME/.local/bin"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Trivy install failed after retries." >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/trivy" --version
+
       - name: Dependency vulnerability audit (pip-audit)
         run: |
           pip-audit
@@ -74,14 +92,15 @@ jobs:
           bandit -r app -q
 
       - name: Trivy filesystem scan (vuln + secret + misconfig)
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/src" \
-            aquasec/trivy:latest fs \
+          trivy fs \
             --scanners vuln,secret,misconfig \
             --severity HIGH,CRITICAL \
             --exit-code 0 \
-            /src
+            .
 
   docker_build:
     runs-on: ubuntu-latest
@@ -95,11 +114,30 @@ jobs:
       - name: Build Docker image
         run: docker build -t pixtools:ci .
 
-      - name: Trivy image scan
+      - name: Install Trivy CLI
         run: |
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:latest image \
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          for attempt in 1 2 3; do
+            if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+              | sh -s -- -b "$HOME/.local/bin"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Trivy install failed after retries." >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/trivy" --version
+
+      - name: Trivy image scan
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1
+        run: |
+          trivy image \
             --severity HIGH,CRITICAL \
             --exit-code 0 \
             pixtools:ci
