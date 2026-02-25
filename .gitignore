@@ -41,4 +41,7 @@ docker-compose.override.yml
 
 # Local scratch files
 temp/
+
+# Benchmark outputs
+bench/results/
 resume.tex

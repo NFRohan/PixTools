@@ -296,6 +296,7 @@ infra/             Terraform IaC
 k8s/               Kubernetes manifests templates
 scripts/deploy/    Manifest rendering and SSM deploy helpers
 scripts/teardown/  Full environment teardown helpers
+bench/             k6 benchmark scenarios and measurement playbook
 tests/             Unit/integration tests
 ```
 
