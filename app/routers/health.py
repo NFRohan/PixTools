@@ -13,51 +13,39 @@ from app.database import engine
 router = APIRouter(tags=["ops"])
 logger = logging.getLogger(__name__)
 
-@router.get("/health")
-async def health_check():
-    """Deep health check that validates connectivity to DB, Redis, and S3."""
-    health_status = {
-        "status": "healthy",
-        "dependencies": {
-            "database": "unknown",
-            "redis": "unknown",
-            "rabbitmq": "unknown",
-            "s3": "unknown"
-        }
-    }
 
-    # 1. Database Check
+async def _check_database() -> bool:
     try:
         async with AsyncSession(engine) as session:
             await session.execute(text("SELECT 1"))
-        health_status["dependencies"]["database"] = "ok"
+        return True
     except Exception:
-        logger.error("Health check failed: Database unreachable", exc_info=True)
-        health_status["dependencies"]["database"] = "unreachable"
-        health_status["status"] = "unhealthy"
+        logger.error("Health check failed: database unreachable", exc_info=True)
+        return False
 
-    # 2. Redis Check
+
+async def _check_redis() -> bool:
     try:
         redis_client = Redis.from_url(settings.redis_url)
         await redis_client.ping()
         await redis_client.aclose()
-        health_status["dependencies"]["redis"] = "ok"
+        return True
     except Exception:
-        logger.error("Health check failed: Redis unreachable", exc_info=True)
-        health_status["dependencies"]["redis"] = "unreachable"
-        health_status["status"] = "unhealthy"
+        logger.error("Health check failed: redis unreachable", exc_info=True)
+        return False
 
-    # 3. RabbitMQ Check
+
+def _check_rabbitmq() -> bool:
     try:
-        with Connection(settings.rabbitmq_url, connect_timeout=5) as connection:
+        with Connection(settings.rabbitmq_url, connect_timeout=2) as connection:
             connection.connect()
-        health_status["dependencies"]["rabbitmq"] = "ok"
+        return True
     except Exception:
-        logger.error("Health check failed: RabbitMQ unreachable", exc_info=True)
-        health_status["dependencies"]["rabbitmq"] = "unreachable"
-        health_status["status"] = "unhealthy"
+        logger.error("Health check failed: rabbitmq unreachable", exc_info=True)
+        return False
 
-    # 4. S3 Check
+
+def _check_s3() -> bool:
     try:
         s3 = boto3.client(
             "s3",
@@ -66,16 +54,56 @@ async def health_check():
             aws_secret_access_key=settings.aws_secret_access_key,
         )
         s3.head_bucket(Bucket=settings.aws_s3_bucket)
-        health_status["dependencies"]["s3"] = "ok"
+        return True
     except Exception:
-        logger.error("Health check failed: S3 unreachable", exc_info=True)
-        health_status["dependencies"]["s3"] = "unreachable"
-        health_status["status"] = "unhealthy"
+        logger.error("Health check failed: s3 unreachable", exc_info=True)
+        return False
 
-    if health_status["status"] == "unhealthy":
+
+def _build_response(dependencies: dict[str, str]) -> dict:
+    healthy = all(state == "ok" for state in dependencies.values())
+    return {
+        "status": "healthy" if healthy else "unhealthy",
+        "dependencies": dependencies,
+    }
+
+
+@router.get("/livez")
+async def livez():
+    """Fast liveness endpoint for kubelet probes."""
+    return {"status": "alive"}
+
+
+@router.get("/readyz")
+async def readyz():
+    """Readiness endpoint: checks only core dependencies required to serve traffic."""
+    dependencies = {
+        "database": "ok" if await _check_database() else "unreachable",
+        "redis": "ok" if await _check_redis() else "unreachable",
+        "rabbitmq": "ok" if _check_rabbitmq() else "unreachable",
+    }
+    status_payload = _build_response(dependencies)
+    if status_payload["status"] == "unhealthy":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=health_status
+            detail=status_payload,
         )
+    return status_payload
 
-    return health_status
+
+@router.get("/health")
+async def health_check():
+    """Deep health endpoint for diagnostics (includes S3)."""
+    dependencies = {
+        "database": "ok" if await _check_database() else "unreachable",
+        "redis": "ok" if await _check_redis() else "unreachable",
+        "rabbitmq": "ok" if _check_rabbitmq() else "unreachable",
+        "s3": "ok" if _check_s3() else "unreachable",
+    }
+    status_payload = _build_response(dependencies)
+    if status_payload["status"] == "unhealthy":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=status_payload,
+        )
+    return status_payload

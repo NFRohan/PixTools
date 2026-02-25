@@ -28,7 +28,7 @@ spec:
             - worker
             - -Q
             - default_queue
-            - --concurrency=5
+            - --concurrency=6
             - --loglevel=info
           envFrom:
             - configMapRef:
@@ -37,8 +37,8 @@ spec:
                 name: pixtools-runtime
           resources:
             requests:
-              cpu: "300m"
-              memory: "384Mi"
+              cpu: "250m"
+              memory: "320Mi"
             limits:
-              cpu: "1000m"
-              memory: "1024Mi"
+              cpu: "900m"
+              memory: "768Mi"

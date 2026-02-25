@@ -46,9 +46,9 @@ variable "spot_instance_type" {
 }
 
 variable "spot_fallback_instance_types" {
-  description = "Spot fallback types. Still spot-only, no on-demand fallback."
+  description = "Optional spot fallback types. Empty keeps ASG pinned to spot_instance_type."
   type        = list(string)
-  default     = ["c7i-flex.large", "m6i.large"]
+  default     = []
 }
 
 variable "asg_min_size" {

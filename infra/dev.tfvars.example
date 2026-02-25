@@ -5,6 +5,10 @@ aws_region  = "us-east-1"
 # allowed_ingress_cidrs = ["203.0.113.10/32"]
 allowed_ingress_cidrs = ["203.0.113.10/32"]
 
+# Pin compute to memory-optimized flex instance for this workload.
+spot_instance_type = "m7i-flex.large"
+spot_fallback_instance_types = []
+
 # Manifest sync prefix used by CD workflow.
 manifest_s3_prefix = "manifests/dev"
 

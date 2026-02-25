@@ -33,7 +33,7 @@ terraform apply -var-file=dev.tfvars
 
 ## Notes
 
-- Compute is spot-only (`m7i-flex.large` primary).
+- Compute is spot-only and pinned to `m7i-flex.large` by default.
 - RDS is single-AZ `db.t4g.micro`.
 - K3s uses external datastore in RDS (`k3s_state` DB).
 - Manifests are pulled from S3 prefix `manifests/dev`.
