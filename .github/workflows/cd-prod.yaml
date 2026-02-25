@@ -76,24 +76,18 @@ jobs:
         run: |
           aws s3 sync build/manifests "s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}" --delete
 
-      - name: Resolve K3s instance ID
-        id: ec2
+      - name: Resolve K3s instance
         run: |
-          INSTANCE_ID="$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=pixtools-prod-k3s*" "Name=instance-state-name,Values=running" \
-            --query "Reservations[0].Instances[0].InstanceId" \
-            --output text)"
-          if [ -z "${INSTANCE_ID}" ] || [ "${INSTANCE_ID}" = "None" ]; then
-            echo "No running K3s instance found." >&2
-            exit 1
-          fi
-          echo "instance_id=${INSTANCE_ID}" >> "$GITHUB_OUTPUT"
+          chmod +x scripts/deploy/resolve-k3s-instance.sh
+          INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
+          echo "Using K3s instance ${INSTANCE_ID}"
 
       - name: Deploy manifests via SSM command
         env:
           MANIFEST_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
           SSM_WAIT_TIMEOUT_SECONDS: "3300"
         run: |
+          INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
           chmod +x scripts/deploy/run-on-ssm.sh
           REMOTE_CMD="$(cat <<EOF
           set -euo pipefail
@@ -131,8 +125,9 @@ jobs:
           fi
           EOF
           )"
-          scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "${REMOTE_CMD}"
+          scripts/deploy/run-on-ssm.sh "${INSTANCE_ID}" "${REMOTE_CMD}"
 
       - name: Post-deploy pod status
         run: |
-          scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "kubectl -n pixtools get pods -o wide"
+          INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
+          scripts/deploy/run-on-ssm.sh "${INSTANCE_ID}" "kubectl -n pixtools get pods -o wide"
