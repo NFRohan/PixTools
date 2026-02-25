@@ -311,20 +311,41 @@ recover_rabbitmq_volume_affinity_if_needed() {
   kubectl apply -f "${MANIFEST_DIR}/rabbitmq/statefulset.yaml"
 }
 
+prune_pending_pods() {
+  log "Pruning stale Pending pods"
+  kubectl -n "${NAMESPACE}" delete pod --field-selector=status.phase=Pending --ignore-not-found=true || true
+}
+
+rollout_with_retry() {
+  local kind="$1"
+  local name="$2"
+  local timeout_primary="${3:-300s}"
+  local timeout_retry="${4:-600s}"
+
+  if kubectl -n "${NAMESPACE}" rollout status "${kind}/${name}" --timeout="${timeout_primary}"; then
+    return 0
+  fi
+
+  log "Rollout timeout for ${kind}/${name}; pruning Pending pods and retrying"
+  prune_pending_pods
+  kubectl -n "${NAMESPACE}" rollout status "${kind}/${name}" --timeout="${timeout_retry}"
+}
+
 wait_for_rollouts() {
   log "Waiting for core workload rollouts"
-  kubectl -n "${NAMESPACE}" rollout status deployment/redis --timeout=180s
-  if ! kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout=180s; then
+  prune_pending_pods
+  rollout_with_retry deployment redis 180s 420s
+  if ! rollout_with_retry statefulset rabbitmq 180s 420s; then
     log "RabbitMQ rollout timed out; retrying after affinity recovery"
     recover_rabbitmq_volume_affinity_if_needed
-    kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout=300s
+    rollout_with_retry statefulset rabbitmq 240s 420s
   fi
-  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-api --timeout=300s
-  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-worker-standard --timeout=300s
-  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-worker-ml --timeout=300s
-  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-beat --timeout=180s
+  rollout_with_retry deployment pixtools-api 300s 600s
+  rollout_with_retry deployment pixtools-worker-standard 300s 600s
+  rollout_with_retry deployment pixtools-worker-ml 300s 600s
+  rollout_with_retry deployment pixtools-beat 180s 420s
 
-  if ! kubectl -n "${NAMESPACE}" rollout status deployment/alloy --timeout=180s; then
+  if ! rollout_with_retry deployment alloy 180s 420s; then
     log "Alloy rollout did not complete; continuing because it is non-blocking for core processing"
   fi
 }
