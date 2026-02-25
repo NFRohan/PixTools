@@ -7,6 +7,8 @@ metadata:
     app: pixtools-worker-ml
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: pixtools-worker-ml

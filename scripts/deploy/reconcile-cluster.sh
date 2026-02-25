@@ -67,19 +67,42 @@ wait_for_nodes() {
   return 1
 }
 
+ready_node_count() {
+  kubectl get nodes -o json 2>/dev/null \
+    | jq '[.items[] | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length'
+}
+
+wait_for_ready_nodes() {
+  local timeout_seconds="${1:-180}"
+  local elapsed=0
+  local count=0
+
+  while (( elapsed < timeout_seconds )); do
+    count="$(ready_node_count)"
+    if [[ "${count}" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+      return 0
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+
+  return 1
+}
+
 ensure_cluster_has_nodes() {
-  if wait_for_nodes 60; then
+  if wait_for_nodes 60 && wait_for_ready_nodes 90; then
     return 0
   fi
 
-  log "No nodes registered yet; restarting k3s service to recover control-plane/agent state"
+  log "No Ready nodes yet; restarting k3s service to recover control-plane/agent state"
   systemctl restart k3s || true
 
-  if wait_for_nodes 180; then
+  if wait_for_nodes 180 && wait_for_ready_nodes 240; then
     return 0
   fi
 
-  log "Cluster still has zero registered nodes after restart"
+  log "Cluster still has no Ready nodes after restart"
+  kubectl get nodes -o wide || true
   systemctl --no-pager --full status k3s || true
   journalctl -u k3s -n 120 --no-pager || true
   return 1
@@ -206,11 +229,16 @@ label_cluster_nodes() {
   local -a live_nodes=()
   local node_found=false
 
-  while IFS=$'\t' read -r node_name provider_id; do
+  while IFS=$'\t' read -r node_name provider_id ready_status; do
     local instance_id=""
     local instance_state
 
     [[ -z "${node_name}" ]] && continue
+
+    if [[ "${ready_status}" != "True" ]]; then
+      log "Skipping NotReady node ${node_name}"
+      continue
+    fi
 
     if [[ "${provider_id}" == *"/i-"* ]]; then
       instance_id="${provider_id##*/}"
@@ -233,19 +261,19 @@ label_cluster_nodes() {
 
     live_nodes+=("${node_name}")
     node_found=true
-  done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // "")] | @tsv')
+  done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // ""), (any(.status.conditions[]?; .type == "Ready" and .status == "True")|tostring)] | @tsv')
 
   if [[ "${node_found}" != "true" || "${#live_nodes[@]}" -eq 0 ]]; then
     # Node registration can lag briefly after k3s restart.
-    if wait_for_nodes 60; then
-      while IFS=$'\t' read -r node_name _; do
-        [[ -n "${node_name}" ]] && live_nodes+=("${node_name}")
-      done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // "")] | @tsv')
+    if wait_for_ready_nodes 60; then
+      while IFS=$'\t' read -r node_name _ ready_status; do
+        [[ -n "${node_name}" && "${ready_status}" == "True" ]] && live_nodes+=("${node_name}")
+      done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // ""), (any(.status.conditions[]?; .type == "Ready" and .status == "True")|tostring)] | @tsv')
     fi
   fi
 
   if [[ "${#live_nodes[@]}" -eq 0 ]]; then
-    log "No live nodes found in cluster"
+    log "No Ready live nodes found in cluster"
     return 1
   fi
 
