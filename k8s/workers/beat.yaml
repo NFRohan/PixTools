@@ -15,6 +15,8 @@ spec:
       labels:
         app: pixtools-beat
     spec:
+      nodeSelector:
+        pixtools-workload-infra: "true"
       imagePullSecrets:
         - name: ecr-pull
       containers:

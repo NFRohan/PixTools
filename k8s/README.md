@@ -15,7 +15,11 @@ These are replaced in CI/CD before sync to S3.
 
 - AWS Load Balancer Controller handles ALB ingress.
 - API service is `NodePort` to support ALB target type `instance`.
-- Runtime secret/config (`pixtools-runtime`, `pixtools-config`) is created by EC2 bootstrap from SSM.
+- Runtime secret/config (`pixtools-runtime`, `pixtools-config`, `grafana-cloud`, `rabbitmq-auth`) is reconciled from SSM by `scripts/deploy/reconcile-cluster.sh`.
+- Workloads use explicit node selectors:
+  - app pods: `pixtools-workload-app=true`
+  - infra pods: `pixtools-workload-infra=true`
+- CD uploads rendered manifests + reconcile script to S3, then executes reconcile over SSM.
 
 ## Monitoring Components
 

@@ -31,6 +31,8 @@ resource "aws_launch_template" "k3s" {
 
   user_data = base64encode(templatefile("${path.module}/templates/k3s_user_data.sh.tftpl", {
     aws_region      = var.aws_region
+    project         = var.project
+    environment     = var.environment
     cluster_name    = "${local.name_prefix}-k3s"
     manifest_bucket = aws_s3_bucket.manifests.bucket
     manifest_prefix = var.manifest_s3_prefix

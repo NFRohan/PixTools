@@ -98,18 +98,20 @@ jobs:
           chmod +x scripts/deploy/run-on-ssm.sh
           REMOTE_CMD="$(cat <<EOF
           set -euo pipefail
-          mkdir -p /opt/pixtools/manifests/scripts/deploy
-          aws s3 cp \
-            s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}/scripts/deploy/reconcile-cluster.sh \
-            /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
-          chmod +x /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
-          AWS_REGION=${AWS_REGION} \
-            PROJECT=pixtools \
-            ENVIRONMENT=${ENVIRONMENT} \
-            MANIFEST_BUCKET=${MANIFEST_BUCKET} \
-            MANIFEST_PREFIX=${MANIFEST_PREFIX} \
-            NAMESPACE=pixtools \
-            /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+          mkdir -p /opt/pixtools/manifests
+          aws s3 sync s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX} /opt/pixtools/manifests --delete
+          if [ -f /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh ]; then
+            chmod +x /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+            AWS_REGION=${AWS_REGION} \
+              PROJECT=pixtools \
+              ENVIRONMENT=${ENVIRONMENT} \
+              MANIFEST_BUCKET=${MANIFEST_BUCKET} \
+              MANIFEST_PREFIX=${MANIFEST_PREFIX} \
+              NAMESPACE=pixtools \
+              /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+          else
+            find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -n 1 kubectl apply -f
+          fi
           EOF
           )"
           scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "${REMOTE_CMD}"

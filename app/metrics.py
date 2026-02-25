@@ -120,17 +120,18 @@ def refresh_queue_depth_metrics(force: bool = False) -> None:
         _last_queue_refresh_monotonic = now
 
     try:
-        with Connection(settings.rabbitmq_url, connect_timeout=3) as connection:
-            with connection.channel() as channel:
-                for queue_name in _QUEUE_NAMES:
-                    _, message_count, consumer_count = channel.queue_declare(
-                        queue=queue_name,
-                        passive=True,
-                    )
-                    rabbitmq_queue_depth.labels(queue=queue_name).set(message_count)
-                    rabbitmq_queue_consumers.labels(queue=queue_name).set(consumer_count)
+        with (
+            Connection(settings.rabbitmq_url, connect_timeout=3) as connection,
+            connection.channel() as channel,
+        ):
+            for queue_name in _QUEUE_NAMES:
+                _, message_count, consumer_count = channel.queue_declare(
+                    queue=queue_name,
+                    passive=True,
+                )
+                rabbitmq_queue_depth.labels(queue=queue_name).set(message_count)
+                rabbitmq_queue_consumers.labels(queue=queue_name).set(consumer_count)
         rabbitmq_up.set(1)
     except Exception:
         rabbitmq_up.set(0)
         logger.warning("Failed to refresh RabbitMQ queue depth metrics", exc_info=True)
-

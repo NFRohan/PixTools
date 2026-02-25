@@ -150,9 +150,24 @@ docker compose run --rm migrate
 
 ## Infrastructure & Operations (GitOps)
 
-Deployments are entirely automated using GitHub Actions pipelines and applied dynamically via AWS Systems Manager (SSM).
+Deployments are automated through a single reconcile flow executed over AWS Systems Manager (SSM), so cluster fixes are versioned instead of manual patches.
 Infrastructure code lives in `infra/`.  
 Rendered manifests are generated from `k8s/` by `scripts/deploy/render-manifests.sh`.
+
+### Canonical deploy flow
+
+1. CI/CD builds API and worker images and pushes immutable digests to ECR.
+2. `scripts/deploy/render-manifests.sh` renders `k8s/` templates and packages `scripts/deploy/reconcile-cluster.sh`.
+3. CD uploads artifacts to `s3://<manifest-bucket>/<manifest-prefix>`.
+4. CD runs one remote command via `scripts/deploy/run-on-ssm.sh` that executes `reconcile-cluster.sh` on the K3s node.
+5. `reconcile-cluster.sh` performs the full convergence pass:
+   - sync manifests from S3
+   - refresh ECR pull secret
+   - materialize runtime secrets/config from SSM
+   - clean stale Kubernetes nodes and relabel node roles (`pixtools-workload-app`, `pixtools-workload-infra`)
+   - apply manifests in deterministic order
+   - auto-recover RabbitMQ PVC node-affinity mismatch when detected
+   - wait for rollout completion of core workloads
 
 ### Terraform baseline
 
@@ -218,11 +233,12 @@ If unset, deploy logic falls back to `/pixtools/dev/grafana_cloud_stack_id`.
   - build + push API/worker images to ECR
   - render manifests with image digests + ingress values
   - sync manifests to S3
-  - apply manifests on K3s node via SSM command
+  - execute `scripts/deploy/reconcile-cluster.sh` on K3s node via SSM
   - run post-deploy smoke test (`/api/health`, then `POST /api/process`, then poll to completion)
 
 - `CD-Prod` (`.github/workflows/cd-prod.yaml`)
   - manual trigger (`workflow_dispatch`)
+  - same reconcile flow as `CD-Dev` against `prod` secrets/prefix
 
 ### Required GitHub secrets
 

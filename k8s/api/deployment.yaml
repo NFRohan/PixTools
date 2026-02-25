@@ -20,6 +20,8 @@ spec:
       labels:
         app: pixtools-api
     spec:
+      nodeSelector:
+        pixtools-workload-app: "true"
       imagePullSecrets:
         - name: ecr-pull
       initContainers:

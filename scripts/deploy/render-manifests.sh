@@ -11,6 +11,9 @@ OUT_DIR="${1:-build/manifests}"
 rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}"
 cp -R k8s/. "${OUT_DIR}/"
+mkdir -p "${OUT_DIR}/scripts/deploy"
+cp scripts/deploy/reconcile-cluster.sh "${OUT_DIR}/scripts/deploy/reconcile-cluster.sh"
+chmod +x "${OUT_DIR}/scripts/deploy/reconcile-cluster.sh"
 
 while IFS= read -r -d '' file; do
   sed -i \
@@ -22,4 +25,3 @@ while IFS= read -r -d '' file; do
 done < <(find "${OUT_DIR}" -type f -name "*.yaml" -print0)
 
 echo "Rendered manifests into ${OUT_DIR}"
-
