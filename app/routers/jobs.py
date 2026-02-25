@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 import uuid
 from typing import Annotated
 from urllib.parse import urlparse
@@ -258,6 +259,7 @@ async def create_job(
     from app.logging_config import request_id_ctx
 
     request_id = request_id_ctx.get()
+    enqueued_at = time.time()
     op_values = [op.value for op in ops]
     pipeline_ops = [op for op in op_values if op != OperationType.METADATA.value]
     metadata_requested = OperationType.METADATA.value in op_values
@@ -269,6 +271,7 @@ async def create_job(
             pipeline_ops,
             request_id=request_id,
             operation_params=op_params,
+            enqueued_at=enqueued_at,
         )
 
     if metadata_requested:
@@ -279,7 +282,11 @@ async def create_job(
                 "s3_raw_key": s3_raw_key,
                 "mark_completed": not pipeline_ops,
             },
-            headers={"X-Request-ID": request_id},
+            headers={
+                "X-Request-ID": request_id,
+                "X-Job-ID": str(job_id),
+                "X-Job-Enqueued-At": str(enqueued_at),
+            },
         ).apply_async()
 
     logger.info("Job %s created and dispatched", job_id)

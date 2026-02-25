@@ -1,6 +1,7 @@
 """EXIF metadata extraction task."""
 
 import logging
+import time
 from contextlib import suppress
 
 from PIL import ExifTags
@@ -8,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.metrics import job_end_to_end_seconds, job_status_total
 from app.models import Job, JobStatus
 from app.services.s3 import download_raw
 from app.services.webhook import notify_job_update
@@ -144,13 +146,28 @@ def _extract_exif_metadata(s3_raw_key: str) -> dict:
     return metadata
 
 
+def _parse_enqueued_at(headers: dict | None) -> float | None:
+    if not headers:
+        return None
+    raw = headers.get("X-Job-Enqueued-At")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 @celery_app.task(name="app.tasks.metadata.extract_metadata", bind=True, max_retries=2)
 def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = False) -> dict:
     """Extract EXIF metadata and persist it on the job row."""
     try:
+        headers = getattr(self.request, "headers", None) or {}
+        enqueued_at = _parse_enqueued_at(headers)
         metadata = _extract_exif_metadata(s3_raw_key)
         engine = _get_sync_engine()
         webhook_url = ""
+        webhook_delivered = True
         with Session(engine) as session:
             job = session.get(Job, job_id)
             if not job:
@@ -167,10 +184,10 @@ def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = 
         if mark_completed and webhook_url:
             import asyncio
             try:
-                delivered = asyncio.run(
+                webhook_delivered = asyncio.run(
                     notify_job_update(webhook_url, job_id, JobStatus.COMPLETED.value, {})
                 )
-                if not delivered:
+                if not webhook_delivered:
                     with Session(engine) as session:
                         job = session.get(Job, job_id)
                         if job:
@@ -188,6 +205,17 @@ def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = 
                     if job:
                         job.status = JobStatus.COMPLETED_WEBHOOK_FAILED
                         session.commit()
+                webhook_delivered = False
+
+        if mark_completed:
+            if enqueued_at is not None:
+                job_end_to_end_seconds.observe(max(0.0, time.time() - enqueued_at))
+            final_status = (
+                JobStatus.COMPLETED_WEBHOOK_FAILED
+                if webhook_url and not webhook_delivered
+                else JobStatus.COMPLETED
+            )
+            job_status_total.labels(status=final_status.value).inc()
 
         logger.info("Job %s: EXIF metadata extracted (%d fields)", job_id, len(metadata))
         return metadata

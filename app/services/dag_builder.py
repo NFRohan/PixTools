@@ -1,6 +1,7 @@
 """DAG builder — composes Celery Canvas workflows from operation lists."""
 
 import logging
+import time
 
 from celery import chord, group
 
@@ -24,6 +25,7 @@ def build_dag(
     operations: list[str],
     request_id: str = "N/A",
     operation_params: dict[str, dict] | None = None,
+    enqueued_at: float | None = None,
 ) -> None:
     """Build and dispatch a Celery Canvas DAG for the given operations.
 
@@ -34,7 +36,12 @@ def build_dag(
     """
     task_signatures = []
     # Every task in the DAG inherits the X-Request-ID for correlation
-    headers = {"X-Request-ID": request_id}
+    enqueue_ts = enqueued_at if enqueued_at is not None else time.time()
+    headers = {
+        "X-Request-ID": request_id,
+        "X-Job-ID": job_id,
+        "X-Job-Enqueued-At": str(enqueue_ts),
+    }
 
     op_params_map = operation_params or {}
 
