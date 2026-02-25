@@ -44,6 +44,12 @@ node_count() {
   kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' '
 }
 
+is_single_node_cluster() {
+  local count
+  count="$(node_count)"
+  [[ "${count}" =~ ^[0-9]+$ ]] && (( count == 1 ))
+}
+
 wait_for_nodes() {
   local timeout_seconds="${1:-120}"
   local elapsed=0
@@ -316,6 +322,36 @@ prune_pending_pods() {
   kubectl -n "${NAMESPACE}" delete pod --field-selector=status.phase=Pending --ignore-not-found=true || true
 }
 
+relax_selectors_for_single_node() {
+  if [[ "${FORCE_SHARED_SCHEDULING_ON_SINGLE_NODE:-true}" != "true" ]]; then
+    return 0
+  fi
+
+  if ! is_single_node_cluster; then
+    return 0
+  fi
+
+  log "Single-node cluster detected; relaxing workload node selectors for recovery"
+
+  for deployment_name in \
+    redis \
+    alloy \
+    pixtools-api \
+    pixtools-worker-standard \
+    pixtools-worker-ml \
+    pixtools-beat; do
+    kubectl -n "${NAMESPACE}" patch deployment "${deployment_name}" \
+      --type merge \
+      -p '{"spec":{"template":{"spec":{"nodeSelector":null,"affinity":null}}}}' >/dev/null || true
+  done
+
+  kubectl -n "${NAMESPACE}" patch statefulset rabbitmq \
+    --type merge \
+    -p '{"spec":{"template":{"spec":{"nodeSelector":null,"affinity":null}}}}' >/dev/null || true
+
+  prune_pending_pods
+}
+
 rollout_with_retry() {
   local kind="$1"
   local name="$2"
@@ -333,6 +369,7 @@ rollout_with_retry() {
 
 wait_for_rollouts() {
   log "Waiting for core workload rollouts"
+  relax_selectors_for_single_node
   prune_pending_pods
   rollout_with_retry deployment redis 180s 420s
   if ! rollout_with_retry statefulset rabbitmq 180s 420s; then
