@@ -298,7 +298,10 @@ recover_rabbitmq_volume_affinity_if_needed() {
     return 0
   fi
 
-  if ! kubectl -n "${NAMESPACE}" describe pod rabbitmq-0 | grep -qi "volume node affinity conflict"; then
+  local pod_description
+  pod_description="$(kubectl -n "${NAMESPACE}" describe pod rabbitmq-0 2>/dev/null || true)"
+
+  if ! grep -Eqi "volume node affinity conflict|PersistentVolume.?s node affinity|didn't match PersistentVolume" <<<"${pod_description}"; then
     return 0
   fi
 
@@ -309,8 +312,10 @@ recover_rabbitmq_volume_affinity_if_needed() {
 
   kubectl -n "${NAMESPACE}" delete pod rabbitmq-0 --ignore-not-found=true >/dev/null || true
   kubectl -n "${NAMESPACE}" delete pvc rabbitmq-data-rabbitmq-0 --ignore-not-found=true >/dev/null || true
+  kubectl -n "${NAMESPACE}" wait --for=delete pvc/rabbitmq-data-rabbitmq-0 --timeout=120s >/dev/null || true
   if [[ -n "${pv_name}" ]]; then
     kubectl delete pv "${pv_name}" --ignore-not-found=true >/dev/null || true
+    kubectl wait --for=delete "pv/${pv_name}" --timeout=120s >/dev/null || true
   fi
 
   kubectl apply -f "${MANIFEST_DIR}/rabbitmq/service.yaml"
