@@ -82,7 +82,7 @@ jobs:
         id: ec2
         run: |
           INSTANCE_ID="$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=pixtools-dev-k3s" "Name=instance-state-name,Values=running" \
+            --filters "Name=tag:Name,Values=pixtools-dev-k3s*" "Name=instance-state-name,Values=running" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)"
           if [ -z "${INSTANCE_ID}" ] || [ "${INSTANCE_ID}" = "None" ]; then
@@ -98,20 +98,18 @@ jobs:
           chmod +x scripts/deploy/run-on-ssm.sh
           REMOTE_CMD="$(cat <<EOF
           set -euo pipefail
-          GRAFANA_STACK_ID=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_stack_id --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_LOGS_USER=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_logs_user --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_METRICS_USER=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_metrics_user --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_TRACES_USER=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_traces_user --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_API_KEY=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_api_key --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_LOGS_URL=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_logs_url --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_METRICS_URL=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_metrics_url --query Parameter.Value --output text 2>/dev/null || true)
-          GRAFANA_TRACES_URL=\$(aws ssm get-parameter --region ${AWS_REGION} --name /pixtools/${ENVIRONMENT}/grafana_cloud_traces_url --query Parameter.Value --output text 2>/dev/null || true)
-          if [ -z "\${GRAFANA_LOGS_USER}" ]; then GRAFANA_LOGS_USER="\${GRAFANA_STACK_ID}"; fi
-          if [ -z "\${GRAFANA_METRICS_USER}" ]; then GRAFANA_METRICS_USER="\${GRAFANA_STACK_ID}"; fi
-          if [ -z "\${GRAFANA_TRACES_USER}" ]; then GRAFANA_TRACES_USER="\${GRAFANA_STACK_ID}"; fi
-          kubectl -n pixtools create secret generic grafana-cloud --from-literal=stack_id="\${GRAFANA_STACK_ID}" --from-literal=logs_user="\${GRAFANA_LOGS_USER}" --from-literal=metrics_user="\${GRAFANA_METRICS_USER}" --from-literal=traces_user="\${GRAFANA_TRACES_USER}" --from-literal=api_key="\${GRAFANA_API_KEY}" --from-literal=logs_url="\${GRAFANA_LOGS_URL}" --from-literal=metrics_url="\${GRAFANA_METRICS_URL}" --from-literal=traces_url="\${GRAFANA_TRACES_URL}" --dry-run=client -o yaml | kubectl apply -f -
-          aws s3 sync s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX} /opt/pixtools/manifests --delete
-          find /opt/pixtools/manifests -type f -name '*.yaml' -print0 | xargs -0 -n 1 kubectl apply -f
+          mkdir -p /opt/pixtools/manifests/scripts/deploy
+          aws s3 cp \
+            s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}/scripts/deploy/reconcile-cluster.sh \
+            /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+          chmod +x /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+          AWS_REGION=${AWS_REGION} \
+            PROJECT=pixtools \
+            ENVIRONMENT=${ENVIRONMENT} \
+            MANIFEST_BUCKET=${MANIFEST_BUCKET} \
+            MANIFEST_PREFIX=${MANIFEST_PREFIX} \
+            NAMESPACE=pixtools \
+            /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
           EOF
           )"
           scripts/deploy/run-on-ssm.sh "${{ steps.ec2.outputs.instance_id }}" "${REMOTE_CMD}"
