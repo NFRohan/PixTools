@@ -19,6 +19,7 @@ opentelemetry-instrumentation-fastapi==0.52b1
 opentelemetry-instrumentation-celery==0.52b1
 opentelemetry-instrumentation-httpx==0.52b1
 prometheus-fastapi-instrumentator==7.0.2
+prometheus-client==0.22.1
 torch==2.5.1+cpu
 python-multipart==0.0.22
 psycopg2-binary==2.9.10

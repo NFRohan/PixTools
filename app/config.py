@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # RabbitMQ
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672//"
+    ml_queue_isolation_enabled: bool = True
 
     # Idempotency
     idempotency_ttl_seconds: int = 86400  # 24 hours

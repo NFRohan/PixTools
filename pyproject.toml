@@ -24,6 +24,7 @@ dependencies = [
     "opentelemetry-instrumentation-celery>=0.52b0",
     "opentelemetry-instrumentation-httpx>=0.52b0",
     "prometheus-fastapi-instrumentator>=7.0.0",
+    "prometheus-client>=0.22.1",
     "torch>=2.5.0",
     "python-multipart>=0.0.18",
     "pillow-avif-plugin>=1.4.6",
