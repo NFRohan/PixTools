@@ -87,6 +87,28 @@ Compare lightweight latency:
 - `http_req_duration{workload="light"} p95`
 - `pixtools_job_queue_wait_seconds{task_name="app.tasks.image_ops.convert_webp"}`
 
+## Automated Server-Side Metric Collection
+
+After each k6 run, collect backend metrics directly from Grafana Cloud Prometheus:
+
+```powershell
+$env:GRAFANA_PROMETHEUS_URL = "https://prometheus-<stack>.grafana.net"
+$env:GRAFANA_PROMETHEUS_USER = "<metrics_instance_id>"
+$env:GRAFANA_PROMETHEUS_API_KEY = "<grafana_api_key_with_metrics:read>"
+
+.\bench\collect-grafana-metrics.ps1 `
+  -Scenario baseline `
+  -Environment dev `
+  -BaseUrl "http://<ALB_DNS>" `
+  -CommitSha "<git_sha>" `
+  -WindowMinutes 10 `
+  -WriteMarkdownReport
+```
+
+Outputs:
+- `bench/results/<scenario>-server-metrics.json` (Prometheus-derived metrics + PromQL used)
+- `bench/results/<scenario>-auto-report.md` (quick report draft if `-WriteMarkdownReport` set)
+
 ## Grafana Query Starter Set
 
 Use the same time window as each test.
