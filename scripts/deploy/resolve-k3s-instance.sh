@@ -7,6 +7,24 @@ WAIT_FOR_SSM_ONLINE="${WAIT_FOR_SSM_ONLINE:-true}"
 SSM_READY_TIMEOUT_SECONDS="${SSM_READY_TIMEOUT_SECONDS:-900}"
 SSM_READY_POLL_SECONDS="${SSM_READY_POLL_SECONDS:-10}"
 
+can_query_ssm_instance_information() {
+  local probe
+  probe="$(
+    aws ssm describe-instance-information \
+      --region "${AWS_REGION}" \
+      --max-results 1 \
+      --query "length(InstanceInformationList)" \
+      --output text 2>&1
+  )" || {
+    if grep -qiE "AccessDenied|not authorized" <<<"${probe}"; then
+      return 1
+    fi
+    # For transient/non-auth failures, keep trying normal flow.
+    return 0
+  }
+  return 0
+}
+
 resolve_running_instance_ids() {
   aws ec2 describe-instances \
     --region "${AWS_REGION}" \
@@ -69,6 +87,13 @@ if [[ -z "${instance_ids_text}" || "${instance_ids_text}" == "None" ]]; then
 fi
 
 if [[ "${WAIT_FOR_SSM_ONLINE}" == "true" ]]; then
+  if ! can_query_ssm_instance_information; then
+    read -r instance_id _ <<<"${instance_ids_text}"
+    echo "No permission for ssm:DescribeInstanceInformation; using newest running instance ${instance_id}" >&2
+    echo "${instance_id}"
+    exit 0
+  fi
+
   if ! instance_id="$(resolve_online_instance_id)"; then
     echo "No running K3s instance reached SSM Online after ${SSM_READY_TIMEOUT_SECONDS}s." >&2
     exit 1
