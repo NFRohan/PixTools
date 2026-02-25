@@ -2,7 +2,10 @@
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
+PROJECT="${PROJECT:-pixtools}"
 ENVIRONMENT="${ENVIRONMENT:?ENVIRONMENT is required}"
+ASG_NAME="${ASG_NAME:-${PROJECT}-${ENVIRONMENT}-k3s}"
+PREFER_ASG_INSTANCES="${PREFER_ASG_INSTANCES:-true}"
 WAIT_FOR_SSM_ONLINE="${WAIT_FOR_SSM_ONLINE:-true}"
 SSM_READY_TIMEOUT_SECONDS="${SSM_READY_TIMEOUT_SECONDS:-900}"
 SSM_READY_POLL_SECONDS="${SSM_READY_POLL_SECONDS:-10}"
@@ -26,12 +29,32 @@ can_query_ssm_instance_information() {
 }
 
 resolve_running_instance_ids() {
+  local ids
+  local query
+  query="reverse(sort_by(Reservations[].Instances[], &LaunchTime))[].InstanceId"
+
+  ids="$(
+    aws ec2 describe-instances \
+      --region "${AWS_REGION}" \
+      --filters \
+        "Name=tag:Name,Values=${PROJECT}-${ENVIRONMENT}-k3s*" \
+        "Name=tag:aws:autoscaling:groupName,Values=${ASG_NAME}" \
+        "Name=instance-state-name,Values=running" \
+      --query "${query}" \
+      --output text 2>/dev/null || true
+  )"
+
+  if [[ "${PREFER_ASG_INSTANCES}" == "true" && -n "${ids}" && "${ids}" != "None" ]]; then
+    echo "${ids}"
+    return 0
+  fi
+
   aws ec2 describe-instances \
     --region "${AWS_REGION}" \
     --filters \
-      "Name=tag:Name,Values=pixtools-${ENVIRONMENT}-k3s*" \
+      "Name=tag:Name,Values=${PROJECT}-${ENVIRONMENT}-k3s*" \
       "Name=instance-state-name,Values=running" \
-    --query "reverse(sort_by(Reservations[].Instances[], &LaunchTime))[].InstanceId" \
+    --query "${query}" \
     --output text 2>/dev/null || true
 }
 

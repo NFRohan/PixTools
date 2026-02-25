@@ -11,6 +11,7 @@ COMMAND="$2"
 REGION="${AWS_REGION:-us-east-1}"
 WAIT_TIMEOUT_SECONDS="${SSM_WAIT_TIMEOUT_SECONDS:-1800}"
 POLL_INTERVAL_SECONDS="${SSM_POLL_INTERVAL_SECONDS:-5}"
+PENDING_TIMEOUT_SECONDS="${SSM_PENDING_TIMEOUT_SECONDS:-300}"
 PARAMETERS_JSON="$(jq -cn --arg cmd "${COMMAND}" '{commands: [$cmd]}')"
 
 COMMAND_ID="$(
@@ -81,7 +82,13 @@ if ! [[ "${POLL_INTERVAL_SECONDS}" =~ ^[0-9]+$ ]] || (( POLL_INTERVAL_SECONDS <=
   exit 1
 fi
 
+if ! [[ "${PENDING_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || (( PENDING_TIMEOUT_SECONDS < 0 )); then
+  echo "Invalid SSM_PENDING_TIMEOUT_SECONDS: ${PENDING_TIMEOUT_SECONDS}" >&2
+  exit 1
+fi
+
 elapsed=0
+pending_elapsed=0
 last_status=""
 
 while (( elapsed < WAIT_TIMEOUT_SECONDS )); do
@@ -109,7 +116,24 @@ while (( elapsed < WAIT_TIMEOUT_SECONDS )); do
       print_failure_details
       exit 1
       ;;
-    InProgress|Pending|Delayed|"")
+    Pending)
+      pending_elapsed=$((pending_elapsed + POLL_INTERVAL_SECONDS))
+      if (( PENDING_TIMEOUT_SECONDS > 0 && pending_elapsed >= PENDING_TIMEOUT_SECONDS )); then
+        echo "SSM command ${COMMAND_ID} stayed Pending for ${pending_elapsed}s; cancelling as undeliverable/stuck" >&2
+        cancel_inflight_command
+        sleep 2
+        print_failure_details
+        exit 1
+      fi
+      if [[ "${STATUS}" != "${last_status}" ]] || (( elapsed % 60 == 0 )); then
+        echo "SSM command ${COMMAND_ID} status=${STATUS} elapsed=${elapsed}s pending=${pending_elapsed}s" >&2
+        last_status="${STATUS}"
+      fi
+      sleep "${POLL_INTERVAL_SECONDS}"
+      elapsed=$((elapsed + POLL_INTERVAL_SECONDS))
+      ;;
+    InProgress|Delayed|"")
+      pending_elapsed=0
       if [[ "${STATUS}" != "${last_status}" ]] || (( elapsed % 60 == 0 )); then
         echo "SSM command ${COMMAND_ID} status=${STATUS:-Unknown} elapsed=${elapsed}s" >&2
         last_status="${STATUS}"

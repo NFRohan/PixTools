@@ -89,6 +89,7 @@ jobs:
         env:
           MANIFEST_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
           SSM_WAIT_TIMEOUT_SECONDS: "2100"
+          SSM_PENDING_TIMEOUT_SECONDS: "360"
         run: |
           INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
           chmod +x scripts/deploy/run-on-ssm.sh
