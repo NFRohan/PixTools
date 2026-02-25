@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine
 from app.logging_config import setup_logging
-from app.middleware import register_request_id_middleware
+from app.middleware import register_request_id_middleware, register_request_metrics_middleware
 from app.models import Base
 from app.observability import setup_api_observability
 
@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
 
     # --- Middleware ---
     register_request_id_middleware(application)
+    register_request_metrics_middleware(application)
 
     # --- Register routers ---
     from app.routers.health import router as health_router
