@@ -9,6 +9,8 @@ fi
 INSTANCE_ID="$1"
 COMMAND="$2"
 REGION="${AWS_REGION:-us-east-1}"
+WAIT_TIMEOUT_SECONDS="${SSM_WAIT_TIMEOUT_SECONDS:-1800}"
+POLL_INTERVAL_SECONDS="${SSM_POLL_INTERVAL_SECONDS:-5}"
 PARAMETERS_JSON="$(jq -cn --arg cmd "${COMMAND}" '{commands: [$cmd]}')"
 
 COMMAND_ID="$(
@@ -63,7 +65,20 @@ print_failure_details() {
 
 }
 
-for _ in {1..120}; do
+if ! [[ "${WAIT_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || (( WAIT_TIMEOUT_SECONDS <= 0 )); then
+  echo "Invalid SSM_WAIT_TIMEOUT_SECONDS: ${WAIT_TIMEOUT_SECONDS}" >&2
+  exit 1
+fi
+
+if ! [[ "${POLL_INTERVAL_SECONDS}" =~ ^[0-9]+$ ]] || (( POLL_INTERVAL_SECONDS <= 0 )); then
+  echo "Invalid SSM_POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS}" >&2
+  exit 1
+fi
+
+elapsed=0
+last_status=""
+
+while (( elapsed < WAIT_TIMEOUT_SECONDS )); do
   STATUS="$(
     aws ssm get-command-invocation \
       --region "${REGION}" \
@@ -89,14 +104,21 @@ for _ in {1..120}; do
       exit 1
       ;;
     InProgress|Pending|Delayed|"")
-      sleep 5
+      if [[ "${STATUS}" != "${last_status}" ]] || (( elapsed % 60 == 0 )); then
+        echo "SSM command ${COMMAND_ID} status=${STATUS:-Unknown} elapsed=${elapsed}s" >&2
+        last_status="${STATUS}"
+      fi
+      sleep "${POLL_INTERVAL_SECONDS}"
+      elapsed=$((elapsed + POLL_INTERVAL_SECONDS))
       ;;
     *)
-      sleep 5
+      echo "SSM command ${COMMAND_ID} status=${STATUS} elapsed=${elapsed}s" >&2
+      sleep "${POLL_INTERVAL_SECONDS}"
+      elapsed=$((elapsed + POLL_INTERVAL_SECONDS))
       ;;
   esac
 done
 
-echo "Timed out waiting for SSM command completion" >&2
+echo "Timed out waiting for SSM command completion after ${WAIT_TIMEOUT_SECONDS}s" >&2
 print_failure_details
 exit 1
