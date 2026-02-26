@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     gcc \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . --extra-index-url https://download.pytorch.org/whl/cpu
 
 # ---------- Stage 2: Runtime ----------
 FROM python:3.12-slim AS runtime
