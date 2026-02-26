@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { sleep } from 'k6';
 
-import { POLL_INTERVAL_SECONDS, POLL_MAX_SECONDS } from './config.js';
+import { API_KEY, POLL_INTERVAL_SECONDS, POLL_MAX_SECONDS } from './config.js';
 
 const imageBinary = open('../../../test_image.png', 'b');
 
@@ -20,10 +20,15 @@ export function submitJob({
     payload.operation_params = JSON.stringify(operationParams);
   }
 
+  const headers = {
+    'Idempotency-Key': idempotencyKey,
+  };
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
+
   const res = http.post(`${baseUrl}/api/process`, payload, {
-    headers: {
-      'Idempotency-Key': idempotencyKey,
-    },
+    headers,
     timeout,
     tags: { endpoint: 'process' },
   });
@@ -45,7 +50,9 @@ export function submitJob({
 export function pollJobUntilTerminal(baseUrl, jobId, timeoutSeconds = POLL_MAX_SECONDS) {
   const maxIters = Math.ceil(timeoutSeconds / POLL_INTERVAL_SECONDS);
   for (let i = 0; i < maxIters; i += 1) {
+    const pollHeaders = API_KEY ? { 'X-API-Key': API_KEY } : {};
     const res = http.get(`${baseUrl}/api/jobs/${jobId}`, {
+      headers: pollHeaders,
       tags: { endpoint: 'poll_job' },
     });
     let body = null;

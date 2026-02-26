@@ -22,6 +22,7 @@ jobs:
       ECR_WORKER_REPO: pixtools-worker
       MANIFEST_PREFIX: manifests/dev
       SSM_READY_TIMEOUT_SECONDS: "1200"
+      ASG_NAME: pixtools-dev-k3s-server
 
     steps:
       - name: Checkout
@@ -79,11 +80,27 @@ jobs:
         run: |
           aws s3 sync build/manifests "s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}" --delete
 
-      - name: Resolve K3s instance
+      - name: Wait for K3s server readiness
+        run: |
+          echo "Checking K3s server readiness..."
+          for i in {1..60}; do
+            READY="$(aws ssm get-parameter --name "/pixtools/dev/k3s_server_ready" --query "Parameter.Value" --output text --region "$AWS_REGION" 2>/dev/null || echo "false")"
+            if [ "${READY}" = "true" ]; then
+              echo "K3s server is ready."
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "K3s server did not become ready after 300s." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Resolve K3s server instance
         run: |
           chmod +x scripts/deploy/resolve-k3s-instance.sh
           INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
-          echo "Using K3s instance ${INSTANCE_ID}"
+          echo "Using K3s server instance ${INSTANCE_ID}"
 
       - name: Deploy manifests via SSM command
         env:

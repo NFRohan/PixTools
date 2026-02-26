@@ -7,6 +7,7 @@ param(
     [string]$VarFile = "",
     [string]$BackendConfig = "",
     [switch]$AutoApprove,
+    [switch]$SkipK3sDatastoreReset,
     [switch]$DestroyBackend,
     [switch]$DeleteGithubDeployRole,
     [string]$GithubDeployRoleName = "GitHubActionsPixToolsDeployRole"
@@ -15,6 +16,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:WarningCount = 0
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Write-Info {
     param([string]$Message)
@@ -25,6 +29,47 @@ function Write-WarnMsg {
     param([string]$Message)
     $script:WarningCount++
     Write-Host "[WARN] $Message" -ForegroundColor Yellow
+}
+
+function Refresh-AwsSessionCredentials {
+    $credOutput = & aws configure export-credentials --format process 2>&1
+    if ($LASTEXITCODE -ne 0 -or $null -eq $credOutput) {
+        return $false
+    }
+
+    $credText = ($credOutput | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($credText)) {
+        return $false
+    }
+
+    try {
+        $creds = $credText | ConvertFrom-Json
+    }
+    catch {
+        return $false
+    }
+
+    $accessKeyProp = $creds.PSObject.Properties["AccessKeyId"]
+    $secretKeyProp = $creds.PSObject.Properties["SecretAccessKey"]
+    $sessionTokenProp = $creds.PSObject.Properties["SessionToken"]
+
+    if ($null -eq $accessKeyProp -or [string]::IsNullOrWhiteSpace([string]$accessKeyProp.Value)) {
+        return $false
+    }
+    if ($null -eq $secretKeyProp -or [string]::IsNullOrWhiteSpace([string]$secretKeyProp.Value)) {
+        return $false
+    }
+
+    $env:AWS_ACCESS_KEY_ID = [string]$accessKeyProp.Value
+    $env:AWS_SECRET_ACCESS_KEY = [string]$secretKeyProp.Value
+    if ($null -ne $sessionTokenProp -and -not [string]::IsNullOrWhiteSpace([string]$sessionTokenProp.Value)) {
+        $env:AWS_SESSION_TOKEN = [string]$sessionTokenProp.Value
+    }
+    else {
+        Remove-Item Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
+    }
+    $env:AWS_DEFAULT_REGION = $Region
+    return $true
 }
 
 function Require-Command {
@@ -40,18 +85,46 @@ function Invoke-AwsText {
         [switch]$AllowFailure
     )
 
-    $output = & aws @Args 2>&1
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $prevEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $output = & aws @Args 2>&1
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $prevEap
+        }
+        if ($exitCode -eq 0) {
+            if ($null -eq $output) {
+                return ""
+            }
+            return ($output | Out-String).Trim()
+        }
+
+        $errorText = ""
+        if ($null -ne $output) {
+            $errorText = ($output | Out-String).Trim()
+        }
+        $tokenExpired = $errorText -match "ExpiredToken|RequestExpired|InvalidClientTokenId|UnrecognizedClientException"
+        if ($tokenExpired -and $attempt -lt 3) {
+            if (Refresh-AwsSessionCredentials) {
+                Write-WarnMsg "AWS session expired; refreshed credentials and retrying command."
+                Start-Sleep -Seconds 1
+                continue
+            }
+        }
+
         if ($AllowFailure) {
             return $null
         }
-        throw "aws $($Args -join ' ') failed: $output"
+        throw "aws $($Args -join ' ') failed: $errorText"
     }
-    if ($null -eq $output) {
-        return ""
+
+    if ($AllowFailure) {
+        return $null
     }
-    return ($output | Out-String).Trim()
+    throw "aws $($Args -join ' ') failed after retries."
 }
 
 function Invoke-AwsJson {
@@ -79,8 +152,15 @@ function Invoke-TerraformText {
         [Parameter(Mandatory = $true)][string[]]$Args,
         [switch]$AllowFailure
     )
-    $output = & terraform @Args 2>&1
-    $exitCode = $LASTEXITCODE
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & terraform @Args 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
     if ($exitCode -ne 0) {
         if ($AllowFailure) {
             return $null
@@ -96,9 +176,9 @@ function Invoke-TerraformText {
 function Convert-AwsTextToList {
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text) -or $Text -eq "None") {
-        return @()
+        return ,@()
     }
-    return @(
+    return ,@(
         $Text -split '\s+' |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -ne "None" }
     )
@@ -110,13 +190,13 @@ function Get-ObjectArrayProperty {
         [Parameter(Mandatory = $true)][string]$PropertyName
     )
     if ($null -eq $Object) {
-        return @()
+        return ,@()
     }
     $prop = $Object.PSObject.Properties[$PropertyName]
     if ($null -eq $prop -or $null -eq $prop.Value) {
-        return @()
+        return ,@()
     }
-    return @($prop.Value)
+    return ,@($prop.Value)
 }
 
 function Resolve-RepoPath {
@@ -127,22 +207,39 @@ function Resolve-RepoPath {
     return (Resolve-Path (Join-Path $script:RepoRoot $Path)).Path
 }
 
+function Remove-AnsiEscapeCodes {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+    return [regex]::Replace($Text, '\x1B\[[0-9;]*[A-Za-z]', '')
+}
+
 function Get-TerraformOutputRaw {
     param([string]$Name)
     $value = Invoke-TerraformText -Args @("-chdir=$script:InfraPath", "output", "-raw", $Name) -AllowFailure
-    if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "null") {
+    if ([string]::IsNullOrWhiteSpace($value)) {
         return $null
     }
-    return $value.Trim()
+
+    $clean = Remove-AnsiEscapeCodes -Text $value
+    if ($clean -match "No outputs found") {
+        return $null
+    }
+    if ([string]::IsNullOrWhiteSpace($clean) -or $clean.Trim() -eq "null") {
+        return $null
+    }
+    return $clean.Trim()
 }
 
 function Find-K3sInstanceId {
-    $instanceName = "$Project-$Environment-k3s"
     $text = Invoke-AwsText -AllowFailure -Args @(
         "ec2", "describe-instances",
         "--region", $Region,
         "--filters",
-        "Name=tag:Name,Values=$instanceName",
+        "Name=tag:Project,Values=$Project",
+        "Name=tag:Environment,Values=$Environment",
+        "Name=tag:Role,Values=k3s-server",
         "Name=instance-state-name,Values=pending,running,stopping,stopped",
         "--query", "Reservations[].Instances[].InstanceId",
         "--output", "text"
@@ -229,6 +326,82 @@ function Invoke-SsmCommands {
     }
 }
 
+function Reset-K3sDatastore {
+    param(
+        [string]$InstanceId,
+        [string]$SsmPrefix,
+        [string]$K3sDbName
+    )
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) {
+        Write-WarnMsg "No K3s EC2 instance found; skipping K3s datastore reset."
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($SsmPrefix)) {
+        Write-WarnMsg "SSM prefix unavailable; skipping K3s datastore reset."
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($K3sDbName)) {
+        $K3sDbName = "k3s_state"
+    }
+
+    Write-Info "Resetting K3s datastore database '$K3sDbName' via SSM on $InstanceId"
+
+    $commands = @(
+        "set -euo pipefail",
+        "REGION='$Region'",
+        "SSM_PREFIX='$SsmPrefix'",
+        "K3S_DB_NAME='$K3sDbName'",
+        'DB_URL=$(aws ssm get-parameter --region "$REGION" --name "$SSM_PREFIX/database_url" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)',
+        'if [ -z "$DB_URL" ] || [ "$DB_URL" = "None" ]; then echo "database_url parameter not found; skipping datastore reset"; exit 0; fi',
+        'if ! command -v psql >/dev/null 2>&1; then',
+        '  if command -v yum >/dev/null 2>&1; then sudo yum -y install postgresql15 >/dev/null 2>&1 || true; fi',
+        'fi',
+        "python3 - <<'PY'",
+        'import os',
+        'import subprocess',
+        'import urllib.parse',
+        '',
+        'url = os.environ.get("DB_URL", "")',
+        'k3s_db_name = os.environ.get("K3S_DB_NAME", "k3s_state")',
+        'if not url:',
+        '    raise SystemExit("Empty DB_URL")',
+        '',
+        'if "+" in url.split("://", 1)[0]:',
+        '    url = url.replace("postgresql+asyncpg://", "postgresql://", 1)',
+        '',
+        'parsed = urllib.parse.urlparse(url)',
+        'username = urllib.parse.unquote(parsed.username or "")',
+        'password = urllib.parse.unquote(parsed.password or "")',
+        'hostname = parsed.hostname or ""',
+        'port = str(parsed.port or 5432)',
+        '',
+        'if not username or not password or not hostname:',
+        '    raise SystemExit("Unable to parse DB_URL components")',
+        '',
+        'safe_db = k3s_db_name.replace("_", "")',
+        'if not safe_db.isalnum():',
+        '    raise SystemExit("Unsafe k3s datastore DB name")',
+        '',
+        'env = os.environ.copy()',
+        'env["PGPASSWORD"] = password',
+        'drop_sql = f''DROP DATABASE IF EXISTS "{k3s_db_name}" WITH (FORCE);''',
+        'create_sql = f''CREATE DATABASE "{k3s_db_name}";''',
+        '',
+        'base_cmd = ["psql", "-h", hostname, "-p", port, "-U", username, "-d", "postgres", "-v", "ON_ERROR_STOP=1"]',
+        'subprocess.run(base_cmd + ["-c", drop_sql], check=True, env=env)',
+        'subprocess.run(base_cmd + ["-c", create_sql], check=True, env=env)',
+        'print(f"Reset k3s datastore database: {k3s_db_name}")',
+        'PY'
+    )
+
+    try {
+        Invoke-SsmCommands -InstanceId $InstanceId -Commands $commands
+    }
+    catch {
+        Write-WarnMsg "K3s datastore reset failed: $($_.Exception.Message)"
+    }
+}
+
 function Cleanup-KubernetesWorkloads {
     param([string]$InstanceId)
     if ([string]::IsNullOrWhiteSpace($InstanceId)) {
@@ -243,7 +416,7 @@ function Cleanup-KubernetesWorkloads {
         "  kubectl -n pixtools delete ingress pixtools --ignore-not-found=true || true",
         "  kubectl delete namespace pixtools --ignore-not-found=true --wait=false || true",
         "  if kubectl get namespace pixtools >/dev/null 2>&1; then",
-        "    for i in $(seq 1 36); do",
+        "    for i in `$(seq 1 36); do",
         "      if ! kubectl get namespace pixtools >/dev/null 2>&1; then",
         "        break",
         "      fi",
@@ -304,6 +477,80 @@ function Set-AsgToZero {
     Invoke-AwsText -AllowFailure -Args $terminateArgs | Out-Null
 }
 
+function Wait-ForAsgZero {
+    param(
+        [string]$AsgName,
+        [int]$TimeoutSeconds = 600
+    )
+    if ([string]::IsNullOrWhiteSpace($AsgName)) {
+        return
+    }
+
+    Write-Info "Waiting for ASG '$AsgName' to reach zero in-service instances"
+    $elapsed = 0
+    while ($elapsed -lt $TimeoutSeconds) {
+        $asgJson = Invoke-AwsJson -AllowFailure -Args @(
+            "autoscaling", "describe-auto-scaling-groups",
+            "--region", $Region,
+            "--auto-scaling-group-names", $AsgName,
+            "--output", "json"
+        )
+
+        if ($null -eq $asgJson) {
+            return
+        }
+
+        $groups = Get-ObjectArrayProperty -Object $asgJson -PropertyName "AutoScalingGroups"
+        if ($groups.Count -eq 0) {
+            return
+        }
+
+        $group = $groups[0]
+        $instances = Get-ObjectArrayProperty -Object $group -PropertyName "Instances"
+        if ($instances.Count -eq 0) {
+            Write-Info "ASG is drained."
+            return
+        }
+
+        Start-Sleep -Seconds 10
+        $elapsed += 10
+    }
+
+    Write-WarnMsg "Timed out waiting for ASG '$AsgName' to drain."
+}
+
+function Wait-NoK3sInstances {
+    param(
+        [int]$TimeoutSeconds = 600
+    )
+
+    $instanceName = "$Project-$Environment-k3s"
+    Write-Info "Waiting for all EC2 instances tagged Name=$instanceName to terminate"
+
+    $elapsed = 0
+    while ($elapsed -lt $TimeoutSeconds) {
+        $idsText = Invoke-AwsText -AllowFailure -Args @(
+            "ec2", "describe-instances",
+            "--region", $Region,
+            "--filters",
+            "Name=tag:Name,Values=$instanceName",
+            "Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down",
+            "--query", "Reservations[].Instances[].InstanceId",
+            "--output", "text"
+        )
+        $ids = Convert-AwsTextToList $idsText
+        if ($ids.Count -eq 0) {
+            Write-Info "No live K3s-tagged instances remain."
+            return
+        }
+
+        Start-Sleep -Seconds 10
+        $elapsed += 10
+    }
+
+    Write-WarnMsg "Timed out waiting for K3s EC2 instance termination."
+}
+
 function Get-TaggedResourceArns {
     param(
         [string]$ResourceType,
@@ -320,16 +567,16 @@ function Get-TaggedResourceArns {
     )
 
     if ($null -eq $json) {
-        return @()
+        return ,@()
     }
 
     $arns = @()
     foreach ($entry in (Get-ObjectArrayProperty -Object $json -PropertyName "ResourceTagMappingList")) {
-        if ($null -ne $entry.ResourceARN) {
+        if ($null -ne $entry.ResourceARN -and -not [string]::IsNullOrWhiteSpace([string]$entry.ResourceARN)) {
             $arns += [string]$entry.ResourceARN
         }
     }
-    return $arns | Select-Object -Unique
+    return ,@($arns | Select-Object -Unique)
 }
 
 function Remove-LbcArtifacts {
@@ -343,14 +590,18 @@ function Remove-LbcArtifacts {
     $lbArns = @()
     $lbArns += Get-TaggedResourceArns -ResourceType "elasticloadbalancing:loadbalancer" -TagKey "elbv2.k8s.aws/cluster" -TagValue $ClusterTagValue
     $lbArns += Get-TaggedResourceArns -ResourceType "elasticloadbalancing:loadbalancer" -TagKey "ingress.k8s.aws/stack" -TagValue "pixtools/pixtools"
-    $lbArns = $lbArns | Select-Object -Unique
+    $lbArns = ,@($lbArns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
 
     foreach ($lbArn in $lbArns) {
-        Write-Info "Deleting ALB $lbArn"
+        $lbArnValue = [string]$lbArn
+        if ([string]::IsNullOrWhiteSpace($lbArnValue) -or $lbArnValue -eq "None") {
+            continue
+        }
+        Write-Info "Deleting ALB $lbArnValue"
         Invoke-AwsText -AllowFailure -Args @(
             "elbv2", "delete-load-balancer",
             "--region", $Region,
-            "--load-balancer-arn", $lbArn
+            "--load-balancer-arn", $lbArnValue
         ) | Out-Null
     }
 
@@ -358,11 +609,15 @@ function Remove-LbcArtifacts {
 
     $tgArns = Get-TaggedResourceArns -ResourceType "elasticloadbalancing:targetgroup" -TagKey "elbv2.k8s.aws/cluster" -TagValue $ClusterTagValue
     foreach ($tgArn in $tgArns) {
-        Write-Info "Deleting target group $tgArn"
+        $tgArnValue = [string]$tgArn
+        if ([string]::IsNullOrWhiteSpace($tgArnValue) -or $tgArnValue -eq "None") {
+            continue
+        }
+        Write-Info "Deleting target group $tgArnValue"
         Invoke-AwsText -AllowFailure -Args @(
             "elbv2", "delete-target-group",
             "--region", $Region,
-            "--target-group-arn", $tgArn
+            "--target-group-arn", $tgArnValue
         ) | Out-Null
     }
 
@@ -434,8 +689,9 @@ function Clear-S3BucketCompletely {
         "--region", $Region
     ) | Out-Null
 
+    $batchCounter = 0
     while ($true) {
-        $listJson = Invoke-AwsJson -AllowFailure -Args @(
+        $listJson = Invoke-AwsJson -Args @(
             "s3api", "list-object-versions",
             "--region", $Region,
             "--bucket", $BucketName,
@@ -464,18 +720,28 @@ function Clear-S3BucketCompletely {
             break
         }
 
-        $deletePayloadPath = Join-Path ([System.IO.Path]::GetTempPath()) ("pixtools-s3-delete-" + [guid]::NewGuid().ToString() + ".json")
-        try {
-            @{ Objects = $objects; Quiet = $true } | ConvertTo-Json -Depth 6 -Compress | Set-Content -Path $deletePayloadPath -Encoding Ascii
-            Invoke-AwsText -AllowFailure -Args @(
-                "s3api", "delete-objects",
-                "--region", $Region,
-                "--bucket", $BucketName,
-                "--delete", "file://$deletePayloadPath"
-            ) | Out-Null
-        }
-        finally {
-            Remove-Item -Path $deletePayloadPath -Force -ErrorAction SilentlyContinue
+        $batchCounter++
+        Write-Info "Deleting $($objects.Count) versioned objects from $BucketName (batch $batchCounter)"
+        for ($i = 0; $i -lt $objects.Count; $i += 1000) {
+            $chunkEnd = [Math]::Min($i + 999, $objects.Count - 1)
+            $chunk = @()
+            for ($j = $i; $j -le $chunkEnd; $j++) {
+                $chunk += $objects[$j]
+            }
+
+            $deletePayloadPath = Join-Path ([System.IO.Path]::GetTempPath()) ("pixtools-s3-delete-" + [guid]::NewGuid().ToString() + ".json")
+            try {
+                @{ Objects = $chunk; Quiet = $true } | ConvertTo-Json -Depth 6 -Compress | Set-Content -Path $deletePayloadPath -Encoding Ascii
+                Invoke-AwsText -Args @(
+                    "s3api", "delete-objects",
+                    "--region", $Region,
+                    "--bucket", $BucketName,
+                    "--delete", "file://$deletePayloadPath"
+                ) | Out-Null
+            }
+            finally {
+                Remove-Item -Path $deletePayloadPath -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 }
@@ -518,20 +784,25 @@ function Clear-EcrRepositoryImages {
         }
 
         foreach ($img in $imageIds) {
-            if ($null -ne $img.imageTag -and -not [string]::IsNullOrWhiteSpace([string]$img.imageTag)) {
+            $tagProp = $img.PSObject.Properties["imageTag"]
+            $digestProp = $img.PSObject.Properties["imageDigest"]
+            $imageTag = if ($null -ne $tagProp) { [string]$tagProp.Value } else { "" }
+            $imageDigest = if ($null -ne $digestProp) { [string]$digestProp.Value } else { "" }
+
+            if (-not [string]::IsNullOrWhiteSpace($imageTag)) {
                 Invoke-AwsText -AllowFailure -Args @(
                     "ecr", "batch-delete-image",
                     "--region", $Region,
                     "--repository-name", $RepositoryName,
-                    "--image-ids", "imageTag=$($img.imageTag)"
+                    "--image-ids", "imageTag=$imageTag"
                 ) | Out-Null
             }
-            elseif ($null -ne $img.imageDigest -and -not [string]::IsNullOrWhiteSpace([string]$img.imageDigest)) {
+            elseif (-not [string]::IsNullOrWhiteSpace($imageDigest)) {
                 Invoke-AwsText -AllowFailure -Args @(
                     "ecr", "batch-delete-image",
                     "--region", $Region,
                     "--repository-name", $RepositoryName,
-                    "--image-ids", "imageDigest=$($img.imageDigest)"
+                    "--image-ids", "imageDigest=$imageDigest"
                 ) | Out-Null
             }
         }
@@ -696,6 +967,77 @@ function Remove-TerraformBackendArtifacts {
     }
 }
 
+function Test-SsmPathEmpty {
+    param([string]$PathPrefix)
+    if ([string]::IsNullOrWhiteSpace($PathPrefix)) {
+        return $true
+    }
+
+    $resp = Invoke-AwsJson -AllowFailure -Args @(
+        "ssm", "get-parameters-by-path",
+        "--region", $Region,
+        "--path", $PathPrefix,
+        "--recursive",
+        "--max-results", "1",
+        "--output", "json"
+    )
+    if ($null -eq $resp) {
+        return $true
+    }
+
+    $params = Get-ObjectArrayProperty -Object $resp -PropertyName "Parameters"
+    return ($params.Count -eq 0)
+}
+
+function Verify-TeardownState {
+    param(
+        [string]$AsgName,
+        [string]$SsmPrefix,
+        [string]$ClusterTagValue
+    )
+
+    Write-Info "Running post-teardown verification checks"
+
+    $remainingInstance = Find-K3sInstanceId
+    if (-not [string]::IsNullOrWhiteSpace($remainingInstance)) {
+        Write-WarnMsg "Residual K3s instance still exists: $remainingInstance"
+    }
+    else {
+        Write-Info "No residual K3s instance detected."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($AsgName)) {
+        $asgState = Invoke-AwsText -AllowFailure -Args @(
+            "autoscaling", "describe-auto-scaling-groups",
+            "--region", $Region,
+            "--auto-scaling-group-names", $AsgName,
+            "--query", "AutoScalingGroups[0].[MinSize,MaxSize,DesiredCapacity]",
+            "--output", "text"
+        )
+        if (-not [string]::IsNullOrWhiteSpace($asgState) -and $asgState -ne "None") {
+            Write-WarnMsg "ASG still exists after destroy: $AsgName ($asgState)"
+        }
+        else {
+            Write-Info "ASG state is clean (not found or destroyed)."
+        }
+    }
+
+    if (Test-SsmPathEmpty -PathPrefix $SsmPrefix) {
+        Write-Info "SSM parameter path is empty: $SsmPrefix"
+    }
+    else {
+        Write-WarnMsg "SSM parameter path still has values: $SsmPrefix"
+    }
+
+    $lbArns = Get-TaggedResourceArns -ResourceType "elasticloadbalancing:loadbalancer" -TagKey "elbv2.k8s.aws/cluster" -TagValue $ClusterTagValue
+    if ($lbArns.Count -gt 0) {
+        Write-WarnMsg "Residual LBC ALBs remain: $($lbArns -join ', ')"
+    }
+    else {
+        Write-Info "No residual LBC ALBs detected."
+    }
+}
+
 try {
     Require-Command -Name "aws"
     Require-Command -Name "terraform"
@@ -742,16 +1084,24 @@ try {
     }
     Invoke-TerraformText -Args $initArgs | Out-Null
 
-    $asgName = Get-TerraformOutputRaw -Name "k3s_asg_name"
-    if ([string]::IsNullOrWhiteSpace($asgName)) {
-        $asgName = "$namePrefix-k3s"
+    $serverAsgName = Get-TerraformOutputRaw -Name "k3s_server_asg_name"
+    if ([string]::IsNullOrWhiteSpace($serverAsgName)) {
+        $serverAsgName = "$namePrefix-k3s-server"
+    }
+    $agentAsgName = Get-TerraformOutputRaw -Name "k3s_agent_asg_name"
+    if ([string]::IsNullOrWhiteSpace($agentAsgName)) {
+        $agentAsgName = "$namePrefix-k3s-agent"
     }
     $vpcId = Get-TerraformOutputRaw -Name "vpc_id"
     $imagesBucket = Get-TerraformOutputRaw -Name "images_bucket_name"
     $manifestsBucket = Get-TerraformOutputRaw -Name "manifests_bucket_name"
+    $k3sDbName = Get-TerraformOutputRaw -Name "k3s_datastore_db_name"
     $outputSsmPrefix = Get-TerraformOutputRaw -Name "ssm_parameter_prefix"
     if (-not [string]::IsNullOrWhiteSpace($outputSsmPrefix)) {
         $ssmPrefix = $outputSsmPrefix
+    }
+    if ([string]::IsNullOrWhiteSpace($k3sDbName)) {
+        $k3sDbName = "k3s_state"
     }
 
     if ([string]::IsNullOrWhiteSpace($imagesBucket)) {
@@ -767,10 +1117,13 @@ try {
     Write-Host "  Region      : $Region"
     Write-Host "  Environment : $Environment"
     Write-Host "  Name Prefix : $namePrefix"
-    Write-Host "  ASG         : $asgName"
+    Write-Host "  Server ASG  : $serverAsgName"
+    Write-Host "  Agent ASG   : $agentAsgName"
     Write-Host "  VPC         : $vpcId"
     Write-Host "  SSM Prefix  : $ssmPrefix"
+    Write-Host "  K3s DB      : $k3sDbName"
     Write-Host "  S3 Buckets  : $imagesBucket, $manifestsBucket"
+    Write-Host "  DB Reset    : $(if ($SkipK3sDatastoreReset) { 'disabled' } else { 'enabled' })"
     Write-Host "  Var file    : $VarFile"
     if (-not [string]::IsNullOrWhiteSpace($BackendConfig)) {
         Write-Host "  Backend HCL : $BackendConfig"
@@ -793,14 +1146,20 @@ try {
         Write-WarnMsg "No K3s instance currently detected."
     }
 
+    if (-not $SkipK3sDatastoreReset) {
+        Reset-K3sDatastore -InstanceId $instanceId -SsmPrefix $ssmPrefix -K3sDbName $k3sDbName
+    }
+    else {
+        Write-WarnMsg "Skipping K3s datastore reset (SkipK3sDatastoreReset=true)."
+    }
+
     Cleanup-KubernetesWorkloads -InstanceId $instanceId
     Remove-LbcArtifacts -ClusterTagValue $clusterTag
-    Set-AsgToZero -AsgName $asgName
-
-    Clear-EcrRepositoryImages -RepositoryName "$Project-api"
-    Clear-EcrRepositoryImages -RepositoryName "$Project-worker"
-    Clear-S3BucketCompletely -BucketName $imagesBucket
-    Clear-S3BucketCompletely -BucketName $manifestsBucket
+    Set-AsgToZero -AsgName $agentAsgName
+    Set-AsgToZero -AsgName $serverAsgName
+    Wait-ForAsgZero -AsgName $agentAsgName
+    Wait-ForAsgZero -AsgName $serverAsgName
+    Wait-NoK3sInstances
 
     Write-Info "Running terraform destroy"
     $destroyArgs = @("-chdir=$script:InfraPath", "destroy", "-input=false")
@@ -814,8 +1173,15 @@ try {
         $destroyArgs += "-auto-approve"
     }
 
-    $destroyOutput = & terraform @destroyArgs 2>&1
-    $destroyExit = $LASTEXITCODE
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $destroyOutput = & terraform @destroyArgs 2>&1
+        $destroyExit = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
     if ($destroyOutput) {
         Write-Host ($destroyOutput | Out-String)
     }
@@ -824,9 +1190,20 @@ try {
         Write-WarnMsg "terraform destroy failed on first attempt; retrying after extra cleanup."
         Remove-LbcArtifacts -ClusterTagValue $clusterTag
         Remove-OrphanEnisInVpc -VpcId $vpcId
+        Clear-EcrRepositoryImages -RepositoryName "$Project-api"
+        Clear-EcrRepositoryImages -RepositoryName "$Project-worker"
+        Clear-S3BucketCompletely -BucketName $imagesBucket
+        Clear-S3BucketCompletely -BucketName $manifestsBucket
 
-        $destroyOutput2 = & terraform @destroyArgs 2>&1
-        $destroyExit2 = $LASTEXITCODE
+        $prevEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $destroyOutput2 = & terraform @destroyArgs 2>&1
+            $destroyExit2 = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $prevEap
+        }
         if ($destroyOutput2) {
             Write-Host ($destroyOutput2 | Out-String)
         }
@@ -838,6 +1215,10 @@ try {
     Remove-SsmPath -PathPrefix $ssmPrefix
     Remove-LbcArtifacts -ClusterTagValue $clusterTag
     Remove-OrphanEnisInVpc -VpcId $vpcId
+    Clear-EcrRepositoryImages -RepositoryName "$Project-api"
+    Clear-EcrRepositoryImages -RepositoryName "$Project-worker"
+    Verify-TeardownState -AsgName $serverAsgName -SsmPrefix $ssmPrefix -ClusterTagValue $clusterTag
+    Verify-TeardownState -AsgName $agentAsgName -SsmPrefix $ssmPrefix -ClusterTagValue $clusterTag
 
     if ($DeleteGithubDeployRole) {
         Remove-GithubDeployRoleArtifacts -RoleName $GithubDeployRoleName
@@ -861,5 +1242,6 @@ try {
 catch {
     Write-Host ""
     Write-Host "Teardown failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ($_ | Out-String) -ForegroundColor Red
     exit 1
 }

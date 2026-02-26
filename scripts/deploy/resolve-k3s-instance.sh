@@ -1,99 +1,56 @@
 #!/usr/bin/env bash
+# Resolve the K3s SERVER instance ID for CD operations.
+# Filters by Role=k3s-server tag and waits for SSM Online status.
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
 PROJECT="${PROJECT:-pixtools}"
 ENVIRONMENT="${ENVIRONMENT:?ENVIRONMENT is required}"
-ASG_NAME="${ASG_NAME:-${PROJECT}-${ENVIRONMENT}-k3s}"
-PREFER_ASG_INSTANCES="${PREFER_ASG_INSTANCES:-true}"
 WAIT_FOR_SSM_ONLINE="${WAIT_FOR_SSM_ONLINE:-true}"
 SSM_READY_TIMEOUT_SECONDS="${SSM_READY_TIMEOUT_SECONDS:-900}"
 SSM_READY_POLL_SECONDS="${SSM_READY_POLL_SECONDS:-10}"
 
-can_query_ssm_instance_information() {
-  local probe
-  probe="$(
-    aws ssm describe-instance-information \
-      --region "${AWS_REGION}" \
-      --max-results 1 \
-      --query "length(InstanceInformationList)" \
-      --output text 2>&1
-  )" || {
-    if grep -qiE "AccessDenied|not authorized" <<<"${probe}"; then
-      return 1
-    fi
-    # For transient/non-auth failures, keep trying normal flow.
-    return 0
-  }
-  return 0
-}
-
-resolve_running_instance_ids() {
-  local ids
-  local query
-  query="reverse(sort_by(Reservations[].Instances[], &LaunchTime))[].InstanceId"
-
-  ids="$(
-    aws ec2 describe-instances \
-      --region "${AWS_REGION}" \
-      --filters \
-        "Name=tag:Name,Values=${PROJECT}-${ENVIRONMENT}-k3s*" \
-        "Name=tag:aws:autoscaling:groupName,Values=${ASG_NAME}" \
-        "Name=instance-state-name,Values=running" \
-      --query "${query}" \
-      --output text 2>/dev/null || true
-  )"
-
-  if [[ "${PREFER_ASG_INSTANCES}" == "true" && -n "${ids}" && "${ids}" != "None" ]]; then
-    echo "${ids}"
-    return 0
-  fi
-
+resolve_server_instance_id() {
   aws ec2 describe-instances \
     --region "${AWS_REGION}" \
     --filters \
-      "Name=tag:Name,Values=${PROJECT}-${ENVIRONMENT}-k3s*" \
+      "Name=tag:Project,Values=${PROJECT}" \
+      "Name=tag:Environment,Values=${ENVIRONMENT}" \
+      "Name=tag:Role,Values=k3s-server" \
       "Name=instance-state-name,Values=running" \
-    --query "${query}" \
+    --query "Reservations[].Instances[] | sort_by(@, &LaunchTime) | [-1].InstanceId" \
     --output text 2>/dev/null || true
 }
 
 get_ping_status() {
-  local instance_id="$1"
   aws ssm describe-instance-information \
     --region "${AWS_REGION}" \
-    --filters "Key=InstanceIds,Values=${instance_id}" \
+    --filters "Key=InstanceIds,Values=$1" \
     --query "InstanceInformationList[0].PingStatus" \
     --output text 2>/dev/null || true
 }
 
-resolve_online_instance_id() {
+wait_for_online() {
   local elapsed=0
-  local instance_ids_text=""
-  local -a instance_ids=()
-  local status_lines=""
-
   while (( elapsed < SSM_READY_TIMEOUT_SECONDS )); do
-    instance_ids_text="$(resolve_running_instance_ids)"
-    if [[ -z "${instance_ids_text}" || "${instance_ids_text}" == "None" ]]; then
+    local instance_id
+    instance_id="$(resolve_server_instance_id)"
+
+    if [[ -z "${instance_id}" || "${instance_id}" == "None" ]]; then
       sleep "${SSM_READY_POLL_SECONDS}"
       elapsed=$((elapsed + SSM_READY_POLL_SECONDS))
       continue
     fi
 
-    read -r -a instance_ids <<<"${instance_ids_text}"
-    status_lines=""
-    for instance_id in "${instance_ids[@]}"; do
-      ping_status="$(get_ping_status "${instance_id}")"
-      status_lines="${status_lines}${instance_id}:${ping_status:-Unknown} "
-      if [[ "${ping_status}" == "Online" ]]; then
-        echo "${instance_id}"
-        return 0
-      fi
-    done
+    local status
+    status="$(get_ping_status "${instance_id}")"
+    if [[ "${status}" == "Online" ]]; then
+      echo "${instance_id}"
+      return 0
+    fi
 
     if (( elapsed % 60 == 0 )); then
-      echo "Waiting for SSM Online (${elapsed}s): ${status_lines}" >&2
+      echo "Waiting for server ${instance_id} SSM Online (${elapsed}s, status=${status:-Unknown})" >&2
     fi
 
     sleep "${SSM_READY_POLL_SECONDS}"
@@ -103,27 +60,18 @@ resolve_online_instance_id() {
   return 1
 }
 
-instance_ids_text="$(resolve_running_instance_ids)"
-if [[ -z "${instance_ids_text}" || "${instance_ids_text}" == "None" ]]; then
-  echo "No running K3s instance found for environment ${ENVIRONMENT}." >&2
+# --- Main ---
+instance_id="$(resolve_server_instance_id)"
+if [[ -z "${instance_id}" || "${instance_id}" == "None" ]]; then
+  echo "No running K3s server instance found (Project=${PROJECT}, Environment=${ENVIRONMENT})." >&2
   exit 1
 fi
 
 if [[ "${WAIT_FOR_SSM_ONLINE}" == "true" ]]; then
-  if ! can_query_ssm_instance_information; then
-    read -r instance_id _ <<<"${instance_ids_text}"
-    echo "No permission for ssm:DescribeInstanceInformation; using newest running instance ${instance_id}" >&2
-    echo "${instance_id}"
-    exit 0
-  fi
-
-  if ! instance_id="$(resolve_online_instance_id)"; then
-    echo "No running K3s instance reached SSM Online after ${SSM_READY_TIMEOUT_SECONDS}s." >&2
+  if ! instance_id="$(wait_for_online)"; then
+    echo "K3s server instance did not reach SSM Online after ${SSM_READY_TIMEOUT_SECONDS}s." >&2
     exit 1
   fi
-  echo "${instance_id}"
-  exit 0
 fi
 
-read -r instance_id _ <<<"${instance_ids_text}"
 echo "${instance_id}"

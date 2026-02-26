@@ -15,11 +15,12 @@
 
 ## System Snapshot
 
-- API replicas:
+- **Infra node**: t3.small on-demand (K3s server, RabbitMQ, Redis, Beat)
+- **Workload node(s)**: m7i-flex.large spot ×___  (K3s agents)
+- API replicas (HPA):
 - Standard worker replicas + concurrency:
-- ML worker replicas + concurrency:
+- ML worker replicas + pool:
 - RabbitMQ queue depths before run:
-- Node instance type:
 
 ## Key Results
 

@@ -1,0 +1,226 @@
+#!/bin/bash
+set -euo pipefail
+
+exec > >(tee /var/log/pixtools-bootstrap.log | logger -t pixtools-bootstrap) 2>&1
+
+trap 'echo "Bootstrap FAILED at line $${LINENO}" >&2' ERR
+
+# ---- Variables injected by Terraform ----
+AWS_REGION="${aws_region}"
+CLUSTER_NAME="${cluster_name}"
+MANIFEST_BUCKET="${manifest_bucket}"
+MANIFEST_PREFIX="${manifest_prefix}"
+VPC_ID="${vpc_id}"
+SSM_PREFIX="${ssm_prefix}"
+K3S_TOKEN="${k3s_token}"
+
+DB_HOST="${rds_address}"
+DB_USER="${rds_username}"
+DB_PASS="${rds_password}"
+APP_DB="${app_db_name}"
+K3S_DB="${k3s_db_name}"
+
+echo "=== K3s SERVER bootstrap for $${CLUSTER_NAME} in $${AWS_REGION} ==="
+
+# ---- SSM Agent ----
+yum install -y amazon-ssm-agent || true
+systemctl enable amazon-ssm-agent || true
+systemctl restart amazon-ssm-agent || systemctl start amazon-ssm-agent || true
+
+# ---- System packages ----
+yum update -y
+yum install -y jq unzip tar awscli postgresql15
+
+# ---- Wait for RDS ----
+echo "Waiting for RDS endpoint..."
+until PGPASSWORD="$${DB_PASS}" psql -h "$${DB_HOST}" -U "$${DB_USER}" -d postgres -c "select 1" >/dev/null 2>&1; do
+  sleep 5
+done
+
+if ! PGPASSWORD="$${DB_PASS}" psql -h "$${DB_HOST}" -U "$${DB_USER}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$${K3S_DB}'" | grep -q 1; then
+  PGPASSWORD="$${DB_PASS}" psql -h "$${DB_HOST}" -U "$${DB_USER}" -d postgres -c "CREATE DATABASE $${K3S_DB};"
+fi
+
+# ---- Install K3s SERVER ----
+echo "Installing K3s server..."
+IMDS_TOKEN="$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+if [ -n "$${IMDS_TOKEN}" ]; then
+  INSTANCE_ID="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/instance-id)"
+  AVAILABILITY_ZONE="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+  PRIVATE_IP="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4)"
+else
+  INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
+  AVAILABILITY_ZONE="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+  PRIVATE_IP="$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"
+fi
+PROVIDER_ID="aws:///$${AVAILABILITY_ZONE}/$${INSTANCE_ID}"
+
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_CHANNEL=stable \
+  INSTALL_K3S_EXEC="server \
+    --write-kubeconfig-mode 644 \
+    --disable traefik \
+    --disable servicelb \
+    --token=$${K3S_TOKEN} \
+    --tls-san=$${PRIVATE_IP} \
+    --kubelet-arg=provider-id=$${PROVIDER_ID} \
+    --datastore-endpoint=postgres://${rds_username}:${rds_password}@${rds_address}:5432/${k3s_db_name}" \
+  sh -
+
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+echo "Waiting for K3s API..."
+until kubectl get nodes >/dev/null 2>&1; do
+  sleep 3
+done
+
+# ---- Publish server URL to SSM so agents can discover us ----
+echo "Publishing server URL to SSM..."
+aws ssm put-parameter \
+  --name "$${SSM_PREFIX}/k3s_server_url" \
+  --value "https://$${PRIVATE_IP}:6443" \
+  --type String \
+  --overwrite \
+  --region "$${AWS_REGION}"
+
+# ---- Install Helm ----
+echo "Installing Helm..."
+curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+chmod 700 /tmp/get_helm.sh
+/tmp/get_helm.sh
+
+# ---- AWS Load Balancer Controller ----
+echo "Installing AWS Load Balancer Controller..."
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --namespace kube-system \
+  --set clusterName="$${CLUSTER_NAME}" \
+  --set serviceAccount.create=true \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region="$${AWS_REGION}" \
+  --set vpcId="$${VPC_ID}"
+
+# ---- Label this node as infra only ----
+NODE_NAME="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+kubectl label node "$${NODE_NAME}" \
+  pixtools-workload-infra=true \
+  --overwrite
+
+# ---- Create namespace and secrets ----
+echo "Setting up namespace and secrets from SSM..."
+get_param() {
+  aws ssm get-parameter --name "$1" --with-decryption --query "Parameter.Value" --output text --region "$${AWS_REGION}"
+}
+
+get_param_optional() {
+  aws ssm get-parameter --name "$1" --with-decryption --query "Parameter.Value" --output text --region "$${AWS_REGION}" 2>/dev/null || true
+}
+
+DATABASE_URL="$(get_param "$${SSM_PREFIX}/database_url")"
+REDIS_URL="$(get_param "$${SSM_PREFIX}/redis_url")"
+RABBITMQ_URL="$(get_param "$${SSM_PREFIX}/rabbitmq_url")"
+AWS_S3_BUCKET="$(get_param "$${SSM_PREFIX}/aws_s3_bucket")"
+API_KEY="$(get_param "$${SSM_PREFIX}/api_key")"
+GRAFANA_CLOUD_STACK_ID="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_stack_id")"
+GRAFANA_CLOUD_LOGS_USER="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_logs_user")"
+GRAFANA_CLOUD_METRICS_USER="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_metrics_user")"
+GRAFANA_CLOUD_TRACES_USER="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_traces_user")"
+GRAFANA_CLOUD_API_KEY="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_api_key")"
+GRAFANA_CLOUD_LOGS_URL="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_logs_url")"
+GRAFANA_CLOUD_METRICS_URL="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_metrics_url")"
+GRAFANA_CLOUD_TRACES_URL="$(get_param_optional "$${SSM_PREFIX}/grafana_cloud_traces_url")"
+RABBITMQ_USERNAME="$(get_param "$${SSM_PREFIX}/rabbitmq_username")"
+RABBITMQ_PASSWORD="$(get_param "$${SSM_PREFIX}/rabbitmq_password")"
+IDEMPOTENCY_TTL_SECONDS="$(get_param_optional "$${SSM_PREFIX}/idempotency_ttl_seconds")"
+WEBHOOK_CB_FAIL_THRESHOLD="$(get_param_optional "$${SSM_PREFIX}/webhook_cb_fail_threshold")"
+WEBHOOK_CB_RESET_TIMEOUT="$(get_param_optional "$${SSM_PREFIX}/webhook_cb_reset_timeout")"
+
+IDEMPOTENCY_TTL_SECONDS="$${IDEMPOTENCY_TTL_SECONDS:-86400}"
+WEBHOOK_CB_FAIL_THRESHOLD="$${WEBHOOK_CB_FAIL_THRESHOLD:-5}"
+WEBHOOK_CB_RESET_TIMEOUT="$${WEBHOOK_CB_RESET_TIMEOUT:-60}"
+
+if [ -z "$${GRAFANA_CLOUD_LOGS_USER}" ]; then GRAFANA_CLOUD_LOGS_USER="$${GRAFANA_CLOUD_STACK_ID}"; fi
+if [ -z "$${GRAFANA_CLOUD_METRICS_USER}" ]; then GRAFANA_CLOUD_METRICS_USER="$${GRAFANA_CLOUD_STACK_ID}"; fi
+if [ -z "$${GRAFANA_CLOUD_TRACES_USER}" ]; then GRAFANA_CLOUD_TRACES_USER="$${GRAFANA_CLOUD_STACK_ID}"; fi
+
+kubectl create namespace pixtools --dry-run=client -o yaml | kubectl apply -f -
+
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text --region "$${AWS_REGION}")"
+ECR_REGISTRY="$${ACCOUNT_ID}.dkr.ecr.$${AWS_REGION}.amazonaws.com"
+ECR_PASSWORD="$(aws ecr get-login-password --region "$${AWS_REGION}")"
+
+kubectl -n pixtools create secret docker-registry ecr-pull \
+  --docker-server="$${ECR_REGISTRY}" \
+  --docker-username="AWS" \
+  --docker-password="$${ECR_PASSWORD}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools patch serviceaccount default \
+  -p '{"imagePullSecrets":[{"name":"ecr-pull"}]}' || true
+
+kubectl -n pixtools create secret generic pixtools-runtime \
+  --from-literal=DATABASE_URL="$${DATABASE_URL}" \
+  --from-literal=REDIS_URL="$${REDIS_URL}" \
+  --from-literal=RABBITMQ_URL="$${RABBITMQ_URL}" \
+  --from-literal=AWS_S3_BUCKET="$${AWS_S3_BUCKET}" \
+  --from-literal=API_KEY="$${API_KEY}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools create secret generic rabbitmq-auth \
+  --from-literal=username="$${RABBITMQ_USERNAME}" \
+  --from-literal=password="$${RABBITMQ_PASSWORD}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools create secret generic grafana-cloud \
+  --from-literal=stack_id="$${GRAFANA_CLOUD_STACK_ID}" \
+  --from-literal=logs_user="$${GRAFANA_CLOUD_LOGS_USER}" \
+  --from-literal=metrics_user="$${GRAFANA_CLOUD_METRICS_USER}" \
+  --from-literal=traces_user="$${GRAFANA_CLOUD_TRACES_USER}" \
+  --from-literal=api_key="$${GRAFANA_CLOUD_API_KEY}" \
+  --from-literal=logs_url="$${GRAFANA_CLOUD_LOGS_URL}" \
+  --from-literal=metrics_url="$${GRAFANA_CLOUD_METRICS_URL}" \
+  --from-literal=traces_url="$${GRAFANA_CLOUD_TRACES_URL}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n pixtools create configmap pixtools-config \
+  --from-literal=AWS_REGION="$${AWS_REGION}" \
+  --from-literal=IDEMPOTENCY_TTL_SECONDS="$${IDEMPOTENCY_TTL_SECONDS}" \
+  --from-literal=WEBHOOK_CB_FAIL_THRESHOLD="$${WEBHOOK_CB_FAIL_THRESHOLD}" \
+  --from-literal=WEBHOOK_CB_RESET_TIMEOUT="$${WEBHOOK_CB_RESET_TIMEOUT}" \
+  --from-literal=OBSERVABILITY_ENABLED="true" \
+  --from-literal=METRICS_ENABLED="true" \
+  --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT="http://alloy.pixtools.svc.cluster.local:4318" \
+  --from-literal=OTEL_SERVICE_NAME_API="pixtools-api" \
+  --from-literal=OTEL_SERVICE_NAME_WORKER="pixtools-worker" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# ---- Sync and apply manifests ----
+echo "Syncing manifests from S3..."
+mkdir -p /opt/pixtools/manifests
+aws s3 sync "s3://$${MANIFEST_BUCKET}/$${MANIFEST_PREFIX}/" /opt/pixtools/manifests --region "$${AWS_REGION}" || true
+
+if [ -f /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh ]; then
+  chmod +x /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+  AWS_REGION="$${AWS_REGION}" \
+    PROJECT="${project}" \
+    ENVIRONMENT="${environment}" \
+    MANIFEST_BUCKET="$${MANIFEST_BUCKET}" \
+    MANIFEST_PREFIX="$${MANIFEST_PREFIX}" \
+    NAMESPACE="pixtools" \
+    /opt/pixtools/manifests/scripts/deploy/reconcile-cluster.sh
+elif find /opt/pixtools/manifests -name "*.yaml" -print -quit | grep -q .; then
+  find /opt/pixtools/manifests -type f -name "*.yaml" -print0 | xargs -0 -n 1 kubectl apply -f
+else
+  echo "No manifests found in S3 prefix s3://$${MANIFEST_BUCKET}/$${MANIFEST_PREFIX}/"
+fi
+
+# ---- Mark server as ready ----
+aws ssm put-parameter \
+  --name "$${SSM_PREFIX}/k3s_server_ready" \
+  --value "true" \
+  --type String \
+  --overwrite \
+  --region "$${AWS_REGION}"
+
+echo "=== K3s SERVER bootstrap complete ==="

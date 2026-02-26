@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# Cluster reconciliation script for two-node K3s architecture.
+# Runs on the K3s SERVER node via SSM during CD deployments.
+#
+# Responsibilities:
+#   1. Sync manifests from S3
+#   2. Refresh ECR pull secret
+#   3. Sync runtime config from SSM → K8s secrets/configmaps
+#   4. Label nodes by role (server→infra, agent→app)
+#   5. Apply manifests in deterministic order
+#   6. Wait for rollouts
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -35,90 +45,25 @@ get_param_optional() {
 
 normalize_url() {
   local value="${1:-}"
-  # Guard against accidental "grafana.net./otlp" style URLs.
-  value="${value//.net.\//.net/}"
+  value="${value//.net.\///.net/}"
   printf '%s' "${value}"
 }
 
-node_count() {
-  kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' '
-}
-
-is_single_node_cluster() {
-  local count
-  count="$(node_count)"
-  [[ "${count}" =~ ^[0-9]+$ ]] && (( count == 1 ))
-}
-
-wait_for_nodes() {
-  local timeout_seconds="${1:-120}"
-  local elapsed=0
-  local count=0
-
-  while (( elapsed < timeout_seconds )); do
-    count="$(node_count)"
-    if [[ "${count}" =~ ^[0-9]+$ ]] && (( count > 0 )); then
-      return 0
-    fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-  done
-
-  return 1
-}
-
-ready_node_count() {
-  kubectl get nodes -o json 2>/dev/null \
-    | jq '[.items[] | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length'
-}
-
-wait_for_ready_nodes() {
-  local timeout_seconds="${1:-180}"
-  local elapsed=0
-  local count=0
-
-  while (( elapsed < timeout_seconds )); do
-    count="$(ready_node_count)"
-    if [[ "${count}" =~ ^[0-9]+$ ]] && (( count > 0 )); then
-      return 0
-    fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-  done
-
-  return 1
-}
-
-ensure_cluster_has_nodes() {
-  if wait_for_nodes 60 && wait_for_ready_nodes 90; then
-    return 0
-  fi
-
-  log "No Ready nodes yet; restarting k3s service to recover control-plane/agent state"
-  systemctl restart k3s || true
-
-  if wait_for_nodes 180 && wait_for_ready_nodes 240; then
-    return 0
-  fi
-
-  log "Cluster still has no Ready nodes after restart"
-  kubectl get nodes -o wide || true
-  systemctl --no-pager --full status k3s || true
-  journalctl -u k3s -n 120 --no-pager || true
-  return 1
-}
-
+# ============================================================
+# 1. Sync manifests from S3
+# ============================================================
 sync_manifests() {
   log "Syncing manifests from s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}"
   mkdir -p "${MANIFEST_DIR}"
   aws s3 sync "s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}" "${MANIFEST_DIR}" --delete --region "${AWS_REGION}"
 }
 
+# ============================================================
+# 2. Refresh ECR pull secret
+# ============================================================
 refresh_ecr_pull_secret() {
   log "Refreshing ECR pull secret"
-  local account_id
-  local ecr_registry
-  local ecr_password
+  local account_id ecr_registry ecr_password
 
   account_id="$(aws sts get-caller-identity --query Account --output text --region "${AWS_REGION}")"
   ecr_registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -135,27 +80,17 @@ refresh_ecr_pull_secret() {
     -p '{"imagePullSecrets":[{"name":"ecr-pull"}]}' >/dev/null || true
 }
 
-sync_runtime_materialized_config() {
+# ============================================================
+# 3. Sync runtime config from SSM → K8s secrets/configmaps
+# ============================================================
+sync_runtime_config() {
   log "Syncing runtime secrets/config from SSM"
 
-  local database_url
-  local redis_url
-  local rabbitmq_url
-  local aws_s3_bucket
-  local api_key
-  local rabbitmq_username
-  local rabbitmq_password
-  local idempotency_ttl
-  local webhook_fail_threshold
-  local webhook_reset_timeout
-  local stack_id
-  local logs_user
-  local metrics_user
-  local traces_user
-  local grafana_key
-  local logs_url
-  local metrics_url
-  local traces_url
+  local database_url redis_url rabbitmq_url aws_s3_bucket api_key
+  local rabbitmq_username rabbitmq_password
+  local idempotency_ttl webhook_fail_threshold webhook_reset_timeout
+  local stack_id logs_user metrics_user traces_user grafana_key
+  local logs_url metrics_url traces_url
 
   database_url="$(get_param "${SSM_PREFIX}/database_url")"
   redis_url="$(get_param "${SSM_PREFIX}/redis_url")"
@@ -168,7 +103,6 @@ sync_runtime_materialized_config() {
   idempotency_ttl="$(get_param_optional "${SSM_PREFIX}/idempotency_ttl_seconds")"
   webhook_fail_threshold="$(get_param_optional "${SSM_PREFIX}/webhook_cb_fail_threshold")"
   webhook_reset_timeout="$(get_param_optional "${SSM_PREFIX}/webhook_cb_reset_timeout")"
-
   idempotency_ttl="${idempotency_ttl:-86400}"
   webhook_fail_threshold="${webhook_fail_threshold:-5}"
   webhook_reset_timeout="${webhook_reset_timeout:-60}"
@@ -223,74 +157,64 @@ sync_runtime_materialized_config() {
     --dry-run=client -o yaml | kubectl apply -f -
 }
 
-label_cluster_nodes() {
-  log "Labeling cluster nodes for app/infra placement"
+# ============================================================
+# 4. Label nodes by role
+# ============================================================
+label_nodes_by_role() {
+  log "Labeling cluster nodes by role"
 
-  local -a live_nodes=()
-  local node_found=false
-
-  while IFS=$'\t' read -r node_name provider_id ready_status; do
-    local instance_id=""
-    local instance_state
-
+  while IFS=$'\t' read -r node_name provider_id; do
     [[ -z "${node_name}" ]] && continue
 
-    if [[ "${ready_status}" != "True" ]]; then
-      log "Skipping NotReady node ${node_name}"
-      continue
-    fi
-
+    local instance_id=""
     if [[ "${provider_id}" == *"/i-"* ]]; then
       instance_id="${provider_id##*/}"
     fi
 
+    local role="unknown"
     if [[ -n "${instance_id}" ]]; then
-      instance_state="$(
-        aws ec2 describe-instances \
-          --region "${AWS_REGION}" \
-          --instance-ids "${instance_id}" \
-          --query "Reservations[0].Instances[0].State.Name" \
-          --output text 2>/dev/null || true
-      )"
-      if [[ "${instance_state}" != "running" && "${instance_state}" != "pending" ]]; then
-        log "Deleting stale kubernetes node object ${node_name} (instance ${instance_id} state=${instance_state:-unknown})"
-        kubectl delete node "${node_name}" --ignore-not-found=true >/dev/null || true
-        continue
-      fi
+      role="$(aws ec2 describe-tags \
+        --region "${AWS_REGION}" \
+        --filters "Name=resource-id,Values=${instance_id}" "Name=key,Values=Role" \
+        --query "Tags[0].Value" \
+        --output text 2>/dev/null || echo "unknown")"
     fi
 
-    live_nodes+=("${node_name}")
-    node_found=true
-  done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // ""), (any(.status.conditions[]?; .type == "Ready" and .status == "True")|tostring)] | @tsv')
-
-  if [[ "${node_found}" != "true" || "${#live_nodes[@]}" -eq 0 ]]; then
-    # Node registration can lag briefly after k3s restart.
-    if wait_for_ready_nodes 60; then
-      while IFS=$'\t' read -r node_name _ ready_status; do
-        [[ -n "${node_name}" && "${ready_status}" == "True" ]] && live_nodes+=("${node_name}")
-      done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // ""), (any(.status.conditions[]?; .type == "Ready" and .status == "True")|tostring)] | @tsv')
-    fi
-  fi
-
-  if [[ "${#live_nodes[@]}" -eq 0 ]]; then
-    log "No Ready live nodes found in cluster"
-    return 1
-  fi
-
-  # Default to shared-node placement in demo environments. This avoids hard
-  # scheduling failures during node re-registration or single-node operation.
-  for node in "${live_nodes[@]}"; do
-    kubectl label node "${node}" \
-      pixtools-workload-infra=true \
-      pixtools-workload-app=true \
-      --overwrite >/dev/null
-  done
-
-  log "Infra nodes: ${live_nodes[*]}"
-  log "App nodes: ${live_nodes[*]}"
-  kubectl get nodes -L pixtools-workload-infra,pixtools-workload-app || true
+    case "${role}" in
+      k3s-server)
+        kubectl label node "${node_name}" \
+          pixtools-workload-infra=true \
+          --overwrite >/dev/null
+        # Remove app label if it was previously set
+        kubectl label node "${node_name}" \
+          pixtools-workload-app- \
+          --overwrite >/dev/null 2>&1 || true
+        log "  ${node_name} → infra (server)"
+        ;;
+      k3s-agent)
+        kubectl label node "${node_name}" \
+          pixtools-workload-app=true \
+          --overwrite >/dev/null
+        # Remove infra label if it was previously set
+        kubectl label node "${node_name}" \
+          pixtools-workload-infra- \
+          --overwrite >/dev/null 2>&1 || true
+        log "  ${node_name} → app (agent)"
+        ;;
+      *)
+        log "  ${node_name} → unknown role '${role}', labeling as both (fallback)"
+        kubectl label node "${node_name}" \
+          pixtools-workload-infra=true \
+          pixtools-workload-app=true \
+          --overwrite >/dev/null
+        ;;
+    esac
+  done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // "")] | @tsv')
 }
 
+# ============================================================
+# 5. Apply manifests in deterministic order
+# ============================================================
 apply_manifests() {
   log "Applying manifests in deterministic order"
 
@@ -321,130 +245,38 @@ apply_manifests() {
   done
 }
 
-recover_rabbitmq_volume_affinity_if_needed() {
-  if ! kubectl -n "${NAMESPACE}" get pod rabbitmq-0 >/dev/null 2>&1; then
-    return 1
-  fi
-
-  local pod_description
-  pod_description="$(kubectl -n "${NAMESPACE}" describe pod rabbitmq-0 2>/dev/null || true)"
-
-  if ! grep -Eqi "volume node affinity conflict|PersistentVolume.?s node affinity|didn't match PersistentVolume" <<<"${pod_description}"; then
-    return 1
-  fi
-
-  log "RabbitMQ has a volume node affinity conflict; recreating claim and volume"
-
-  local pv_name
-  pv_name="$(kubectl -n "${NAMESPACE}" get pvc rabbitmq-data-rabbitmq-0 -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)"
-
-  kubectl -n "${NAMESPACE}" delete pod rabbitmq-0 --ignore-not-found=true >/dev/null || true
-  kubectl -n "${NAMESPACE}" delete pvc rabbitmq-data-rabbitmq-0 --ignore-not-found=true >/dev/null || true
-  kubectl -n "${NAMESPACE}" wait --for=delete pvc/rabbitmq-data-rabbitmq-0 --timeout=120s >/dev/null || true
-  if [[ -n "${pv_name}" ]]; then
-    kubectl delete pv "${pv_name}" --ignore-not-found=true >/dev/null || true
-    kubectl wait --for=delete "pv/${pv_name}" --timeout=120s >/dev/null || true
-  fi
-
-  kubectl apply -f "${MANIFEST_DIR}/rabbitmq/service.yaml"
-  kubectl apply -f "${MANIFEST_DIR}/rabbitmq/statefulset.yaml"
-  return 0
-}
-
-prune_pending_pods() {
-  log "Pruning stale Pending pods"
-  kubectl -n "${NAMESPACE}" delete pod --field-selector=status.phase=Pending --ignore-not-found=true || true
-}
-
-relax_selectors_for_single_node() {
-  if [[ "${FORCE_SHARED_SCHEDULING_ON_SINGLE_NODE:-true}" != "true" ]]; then
-    return 0
-  fi
-
-  if ! is_single_node_cluster; then
-    return 0
-  fi
-
-  log "Single-node cluster detected; relaxing workload node selectors for recovery"
-
-  for deployment_name in \
-    redis \
-    alloy \
-    pixtools-api \
-    pixtools-worker-standard \
-    pixtools-worker-ml \
-    pixtools-beat; do
-    kubectl -n "${NAMESPACE}" patch deployment "${deployment_name}" \
-      --type merge \
-      -p '{"spec":{"template":{"spec":{"nodeSelector":null,"affinity":null}}}}' >/dev/null || true
-  done
-
-  kubectl -n "${NAMESPACE}" patch statefulset rabbitmq \
-    --type merge \
-    -p '{"spec":{"template":{"spec":{"nodeSelector":null,"affinity":null}}}}' >/dev/null || true
-
-  prune_pending_pods
-}
-
-rollout_with_retry() {
-  local kind="$1"
-  local name="$2"
-  local timeout_primary="${3:-300s}"
-  local timeout_retry="${4:-600s}"
-
-  if kubectl -n "${NAMESPACE}" rollout status "${kind}/${name}" --timeout="${timeout_primary}"; then
-    return 0
-  fi
-
-  log "Rollout timeout for ${kind}/${name}; pruning Pending pods and retrying"
-  prune_pending_pods
-  kubectl -n "${NAMESPACE}" rollout status "${kind}/${name}" --timeout="${timeout_retry}"
-}
-
-rollout_rabbitmq_with_recovery() {
-  local timeout_primary="${1:-120s}"
-  local timeout_recovery="${2:-300s}"
-
-  if kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout="${timeout_primary}"; then
-    return 0
-  fi
-
-  log "RabbitMQ rollout timed out; checking for PV node-affinity mismatch"
-  if recover_rabbitmq_volume_affinity_if_needed; then
-    log "RabbitMQ PV/PVC recreated; retrying rollout"
-  else
-    log "No RabbitMQ PV affinity mismatch detected; pruning Pending pods before retry"
-    prune_pending_pods
-  fi
-
-  kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout="${timeout_recovery}"
-}
-
+# ============================================================
+# 6. Wait for rollouts
+# ============================================================
 wait_for_rollouts() {
-  log "Waiting for core workload rollouts"
-  relax_selectors_for_single_node
-  prune_pending_pods
-  rollout_with_retry deployment redis 180s 420s
-  rollout_rabbitmq_with_recovery 120s 300s
-  rollout_with_retry deployment pixtools-api 300s 600s
-  rollout_with_retry deployment pixtools-worker-standard 300s 600s
-  rollout_with_retry deployment pixtools-worker-ml 300s 600s
-  rollout_with_retry deployment pixtools-beat 180s 420s
+  log "Waiting for workload rollouts"
 
-  if ! rollout_with_retry deployment alloy 180s 420s; then
-    log "Alloy rollout did not complete; continuing because it is non-blocking for core processing"
+  # Infra workloads (on server node — should always be available)
+  kubectl -n "${NAMESPACE}" rollout status deployment/redis --timeout=120s
+  kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout=180s
+
+  # App workloads (on agent node — may take longer if spot is being provisioned)
+  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-api --timeout=300s
+  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-worker-standard --timeout=300s
+  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-worker-ml --timeout=300s
+  kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-beat --timeout=180s
+
+  # Monitoring (non-blocking)
+  if ! kubectl -n "${NAMESPACE}" rollout status daemonset/alloy --timeout=120s; then
+    log "Alloy rollout did not complete; non-blocking for core processing"
   fi
 }
 
+# ============================================================
+# Main
+# ============================================================
 main() {
   log "Starting cluster reconciliation"
   sync_manifests
   refresh_ecr_pull_secret
-  sync_runtime_materialized_config
-  ensure_cluster_has_nodes
-  label_cluster_nodes
+  sync_runtime_config
+  label_nodes_by_role
   apply_manifests
-  recover_rabbitmq_volume_affinity_if_needed
   wait_for_rollouts
   log "Cluster reconciliation complete"
 }

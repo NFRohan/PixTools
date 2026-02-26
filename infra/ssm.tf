@@ -156,3 +156,27 @@ resource "aws_ssm_parameter" "grafana_cloud_traces_url" {
   tier  = "Standard"
   value = var.grafana_cloud_traces_url
 }
+
+# --- K3s server discovery (populated at runtime by server user data) ---
+
+resource "aws_ssm_parameter" "k3s_server_url" {
+  name  = "${local.ssm_prefix}/k3s_server_url"
+  type  = "String"
+  tier  = "Standard"
+  value = "PENDING"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "k3s_server_ready" {
+  name  = "${local.ssm_prefix}/k3s_server_ready"
+  type  = "String"
+  tier  = "Standard"
+  value = "false"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}

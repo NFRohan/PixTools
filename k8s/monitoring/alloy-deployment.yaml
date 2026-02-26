@@ -1,14 +1,11 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: alloy
   namespace: pixtools
   labels:
     app: alloy
 spec:
-  replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       app: alloy
@@ -17,8 +14,8 @@ spec:
       labels:
         app: alloy
     spec:
-      nodeSelector:
-        pixtools-workload-infra: "true"
+      tolerations:
+        - operator: Exists
       serviceAccountName: alloy
       containers:
         - name: alloy

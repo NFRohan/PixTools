@@ -288,6 +288,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\teardown\teardown-aws.ps1 -En
 ```
 
 Optional flags:
+- By default teardown resets the external K3s datastore DB (`k3s_state`) via SSM before destroying infra to avoid stale control-plane state on next deploy.
+- `-SkipK3sDatastoreReset` to disable that DB reset.
 - `-DestroyBackend` to also remove Terraform backend S3 state bucket and lock table.
 - `-DeleteGithubDeployRole` to delete the GitHub deploy IAM role (`GitHubActionsPixToolsDeployRole` by default).
 

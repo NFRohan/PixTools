@@ -13,9 +13,14 @@ output "private_subnet_ids" {
   value       = [for subnet in aws_subnet.private : subnet.id]
 }
 
-output "k3s_asg_name" {
-  description = "K3s Auto Scaling Group name."
-  value       = aws_autoscaling_group.k3s.name
+output "k3s_server_asg_name" {
+  description = "K3s server (infra) Auto Scaling Group name."
+  value       = aws_autoscaling_group.k3s_server.name
+}
+
+output "k3s_agent_asg_name" {
+  description = "K3s agent (workload) Auto Scaling Group name."
+  value       = aws_autoscaling_group.k3s_agent.name
 }
 
 output "k3s_node_security_group_id" {

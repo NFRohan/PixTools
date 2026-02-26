@@ -4,6 +4,7 @@ param(
     [ValidateSet("baseline", "spike", "retry_storm", "starvation_mix")]
     [string]$Scenario,
     [string]$BaseUrl = "http://localhost:8000",
+    [string]$ApiKey = $env:PIXTOOLS_API_KEY,
     [string]$OutputDir = "bench/results",
     [switch]$ExportRawJson,
     [string[]]$ExtraEnv = @()
@@ -24,25 +25,29 @@ if (-not (Test-Path $scriptPath)) {
 New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
 
 $summaryPath = Join-Path $OutputDir "$Scenario-summary.json"
-$args = @(
+$k6args = @(
     "run",
     "--summary-export", $summaryPath,
     "-e", "BASE_URL=$BaseUrl"
 )
 
+if (-not [string]::IsNullOrWhiteSpace($ApiKey)) {
+    $k6args += @("-e", "API_KEY=$ApiKey")
+}
+
 foreach ($envVar in $ExtraEnv) {
-    $args += @("-e", $envVar)
+    $k6args += @("-e", $envVar)
 }
 
 if ($ExportRawJson) {
     $rawPath = Join-Path $OutputDir "$Scenario-raw.json"
-    $args += @("--out", "json=$rawPath")
+    $k6args += @("--out", "json=$rawPath")
 }
 
-$args += $scriptPath
+$k6args += $scriptPath
 
-Write-Host "Running: k6 $($args -join ' ')" -ForegroundColor Cyan
-& k6 @args
+Write-Host "Running: k6 $($k6args -join ' ')" -ForegroundColor Cyan
+& k6 @k6args
 
 if ($LASTEXITCODE -ne 0) {
     throw "k6 run failed with exit code $LASTEXITCODE"

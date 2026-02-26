@@ -39,40 +39,56 @@ variable "allowed_ingress_cidrs" {
   type        = list(string)
 }
 
-variable "spot_instance_type" {
-  description = "Primary spot instance type for K3s compute."
+# --- Infra node (on-demand, K3s server + RabbitMQ/Redis/Beat) ---
+
+variable "infra_instance_type" {
+  description = "Instance type for the always-on K3s server / infra node."
+  type        = string
+  default     = "t3.small"
+}
+
+variable "infra_volume_size_gb" {
+  description = "Infra node root volume size in GiB."
+  type        = number
+  default     = 20
+}
+
+# --- Workload node(s) (spot, K3s agent + API/workers) ---
+
+variable "workload_instance_type" {
+  description = "Primary spot instance type for K3s workload agents."
   type        = string
   default     = "m7i-flex.large"
 }
 
-variable "spot_fallback_instance_types" {
-  description = "Optional spot fallback types. Empty keeps ASG pinned to spot_instance_type."
+variable "workload_fallback_instance_types" {
+  description = "Spot fallback types for workload ASG. Empty pins to workload_instance_type."
   type        = list(string)
   default     = []
 }
 
-variable "asg_min_size" {
-  description = "ASG min size."
-  type        = number
-  default     = 1
-}
-
-variable "asg_max_size" {
-  description = "ASG max size."
-  type        = number
-  default     = 1
-}
-
-variable "asg_desired_capacity" {
-  description = "ASG desired capacity."
-  type        = number
-  default     = 1
-}
-
-variable "root_volume_size_gb" {
-  description = "EC2 root volume size in GiB."
+variable "workload_volume_size_gb" {
+  description = "Workload node root volume size in GiB."
   type        = number
   default     = 40
+}
+
+variable "workload_asg_min" {
+  description = "Workload ASG minimum size."
+  type        = number
+  default     = 1
+}
+
+variable "workload_asg_max" {
+  description = "Workload ASG maximum size. Set > 1 to allow horizontal scaling under load."
+  type        = number
+  default     = 3
+}
+
+variable "workload_asg_desired" {
+  description = "Workload ASG desired capacity."
+  type        = number
+  default     = 1
 }
 
 variable "rds_instance_class" {

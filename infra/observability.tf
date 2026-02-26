@@ -70,9 +70,9 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
-resource "aws_cloudwatch_metric_alarm" "asg_inservice_low" {
-  alarm_name          = "${local.name_prefix}-asg-inservice-low"
-  alarm_description   = "K3s ASG has fewer than expected in-service instances."
+resource "aws_cloudwatch_metric_alarm" "asg_workload_inservice_low" {
+  alarm_name          = "${local.name_prefix}-asg-workload-inservice-low"
+  alarm_description   = "K3s workload (spot) ASG has fewer than expected in-service instances."
   namespace           = "AWS/AutoScaling"
   metric_name         = "GroupInServiceInstances"
   statistic           = "Minimum"
@@ -84,7 +84,28 @@ resource "aws_cloudwatch_metric_alarm" "asg_inservice_low" {
   treat_missing_data  = "breaching"
 
   dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.k3s.name
+    AutoScalingGroupName = aws_autoscaling_group.k3s_agent.name
+  }
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "asg_server_inservice_low" {
+  alarm_name          = "${local.name_prefix}-asg-server-inservice-low"
+  alarm_description   = "K3s server (on-demand) ASG dropped below 1. Critical."
+  namespace           = "AWS/AutoScaling"
+  metric_name         = "GroupInServiceInstances"
+  statistic           = "Minimum"
+  period              = 60
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.k3s_server.name
   }
 
   alarm_actions = [aws_sns_topic.alerts.arn]

@@ -15,8 +15,10 @@ Produce defensible metrics in 7-10 days:
 
 - Deployed PixTools endpoint (or local stack):
   - `BASE_URL=http://...` where `/api/process`, `/api/jobs/{id}`, `/metrics` exist
+- **API key**: set `PIXTOOLS_API_KEY` env var or pass `-ApiKey` to `run-k6.ps1`
 - k6 installed locally
 - Grafana Cloud receiving metrics/logs
+- A `test_image.png` file in the repo root (used by k6 as the upload payload)
 
 ## Custom Metrics Added
 
@@ -41,13 +43,13 @@ These are emitted by the app/workers and can be queried in Grafana:
 Target: steady throughput and stable queue depth.
 
 ```powershell
-.\bench\run-k6.ps1 -Scenario baseline -BaseUrl "http://<ALB_DNS>" -ExtraEnv @("VUS=50", "DURATION=5m")
+.\bench\run-k6.ps1 -Scenario baseline -BaseUrl "http://<ALB_DNS>" -ApiKey "<key>" -ExtraEnv @("VUS=30", "DURATION=5m")
 ```
 
 Optional completion polling:
 
 ```powershell
-.\bench\run-k6.ps1 -Scenario baseline -BaseUrl "http://<ALB_DNS>" -ExtraEnv @("VUS=30", "DURATION=5m", "POLL_COMPLETION=true")
+.\bench\run-k6.ps1 -Scenario baseline -BaseUrl "http://<ALB_DNS>" -ApiKey "<key>" -ExtraEnv @("VUS=20", "DURATION=5m", "POLL_COMPLETION=true")
 ```
 
 ## 2. High Concurrency Spike
@@ -55,7 +57,7 @@ Optional completion polling:
 Target: observe latency and queue buildup at high fan-in.
 
 ```powershell
-.\bench\run-k6.ps1 -Scenario spike -BaseUrl "http://<ALB_DNS>" -ExtraEnv @("VUS=500", "DURATION=2m")
+.\bench\run-k6.ps1 -Scenario spike -BaseUrl "http://<ALB_DNS>" -ApiKey "<key>" -ExtraEnv @("VUS=200", "DURATION=2m")
 ```
 
 ## 3. Retry Storm
@@ -63,7 +65,7 @@ Target: observe latency and queue buildup at high fan-in.
 Target: verify idempotency under client retry pressure.
 
 ```powershell
-.\bench\run-k6.ps1 -Scenario retry_storm -BaseUrl "http://<ALB_DNS>" -ExtraEnv @("VUS=200", "DURATION=3m", "MAX_CLIENT_ATTEMPTS=3", "REQUEST_TIMEOUT=2s")
+.\bench\run-k6.ps1 -Scenario retry_storm -BaseUrl "http://<ALB_DNS>" -ApiKey "<key>" -ExtraEnv @("VUS=100", "DURATION=3m", "MAX_CLIENT_ATTEMPTS=3", "REQUEST_TIMEOUT=2s")
 ```
 
 Primary counters:
@@ -76,7 +78,7 @@ Primary counters:
 Target: quantify impact of heavy denoise jobs on lightweight conversions.
 
 ```powershell
-.\bench\run-k6.ps1 -Scenario starvation_mix -BaseUrl "http://<ALB_DNS>" -ExtraEnv @("HEAVY_RPS=8", "LIGHT_RPS=2", "DURATION=4m")
+.\bench\run-k6.ps1 -Scenario starvation_mix -BaseUrl "http://<ALB_DNS>" -ApiKey "<key>" -ExtraEnv @("HEAVY_RPS=5", "LIGHT_RPS=2", "DURATION=4m")
 ```
 
 Run twice:

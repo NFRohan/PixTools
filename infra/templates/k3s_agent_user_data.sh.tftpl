@@ -1,0 +1,137 @@
+#!/bin/bash
+set -euo pipefail
+
+exec > >(tee /var/log/pixtools-bootstrap.log | logger -t pixtools-bootstrap) 2>&1
+
+trap 'echo "Bootstrap FAILED at line $${LINENO}" >&2' ERR
+
+# ---- Variables injected by Terraform ----
+AWS_REGION="${aws_region}"
+CLUSTER_NAME="${cluster_name}"
+SSM_PREFIX="${ssm_prefix}"
+K3S_TOKEN="${k3s_token}"
+
+echo "=== K3s AGENT bootstrap for $${CLUSTER_NAME} in $${AWS_REGION} ==="
+
+# ---- SSM Agent ----
+yum install -y amazon-ssm-agent || true
+systemctl enable amazon-ssm-agent || true
+systemctl restart amazon-ssm-agent || systemctl start amazon-ssm-agent || true
+
+# ---- System packages ----
+yum update -y
+yum install -y jq unzip tar awscli
+
+# ---- Wait for K3s server to be ready ----
+echo "Waiting for K3s server to be ready..."
+MAX_WAIT=600
+ELAPSED=0
+K3S_SERVER_URL=""
+
+while [ $${ELAPSED} -lt $${MAX_WAIT} ]; do
+  SERVER_READY="$(aws ssm get-parameter \
+    --name "$${SSM_PREFIX}/k3s_server_ready" \
+    --query "Parameter.Value" \
+    --output text \
+    --region "$${AWS_REGION}" 2>/dev/null || echo "false")"
+
+  if [ "$${SERVER_READY}" = "true" ]; then
+    K3S_SERVER_URL="$(aws ssm get-parameter \
+      --name "$${SSM_PREFIX}/k3s_server_url" \
+      --query "Parameter.Value" \
+      --output text \
+      --region "$${AWS_REGION}")"
+
+    if [ -n "$${K3S_SERVER_URL}" ] && [ "$${K3S_SERVER_URL}" != "PENDING" ]; then
+      echo "Server ready at $${K3S_SERVER_URL}"
+      break
+    fi
+  fi
+
+  echo "Server not ready yet ($${ELAPSED}s / $${MAX_WAIT}s)..."
+  sleep 10
+  ELAPSED=$((ELAPSED + 10))
+done
+
+if [ -z "$${K3S_SERVER_URL}" ] || [ "$${K3S_SERVER_URL}" = "PENDING" ]; then
+  echo "FATAL: K3s server did not become ready after $${MAX_WAIT}s" >&2
+  exit 1
+fi
+
+# ---- Get instance metadata ----
+IMDS_TOKEN="$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+if [ -n "$${IMDS_TOKEN}" ]; then
+  INSTANCE_ID="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/instance-id)"
+  AVAILABILITY_ZONE="$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+else
+  INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
+  AVAILABILITY_ZONE="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+fi
+PROVIDER_ID="aws:///$${AVAILABILITY_ZONE}/$${INSTANCE_ID}"
+
+# ---- Install K3s AGENT ----
+echo "Installing K3s agent, joining server at $${K3S_SERVER_URL}..."
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_CHANNEL=stable \
+  K3S_URL="$${K3S_SERVER_URL}" \
+  K3S_TOKEN="$${K3S_TOKEN}" \
+  INSTALL_K3S_EXEC="agent \
+    --kubelet-arg=provider-id=$${PROVIDER_ID}" \
+  sh -
+
+echo "K3s agent installed and joined cluster."
+
+# ---- Spot Interruption Handler ----
+cat <<'HANDLER' >/usr/local/bin/spot-interrupt-handler.sh
+#!/bin/bash
+set -euo pipefail
+
+METADATA_IP="169.254.169.254"
+TOKEN="$(curl -s -X PUT "http://$${METADATA_IP}/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+
+check_interrupt() {
+  if [ -n "$${TOKEN}" ]; then
+    curl -sf -H "X-aws-ec2-metadata-token: $${TOKEN}" "http://$${METADATA_IP}/latest/meta-data/spot/instance-action" >/dev/null
+  else
+    curl -sf "http://$${METADATA_IP}/latest/meta-data/spot/instance-action" >/dev/null
+  fi
+}
+
+while true; do
+  if check_interrupt; then
+    logger "Spot interruption notice received, draining node"
+    NODE_NAME="$(hostname)"
+    # Use the server's kubectl — agent doesn't have it
+    # The drain is best-effort; Celery's task_acks_late will requeue in-flight tasks
+    curl -sfL https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl-drain 2>/dev/null || true
+    chmod +x /usr/local/bin/kubectl-drain 2>/dev/null || true
+    if [ -x /usr/local/bin/kubectl-drain ]; then
+      /usr/local/bin/kubectl-drain drain "$${NODE_NAME}" --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true
+    fi
+    sleep 120
+  fi
+  sleep 5
+done
+HANDLER
+
+chmod +x /usr/local/bin/spot-interrupt-handler.sh
+
+cat <<'SERVICE' >/etc/systemd/system/spot-handler.service
+[Unit]
+Description=EC2 Spot Interruption Handler
+After=k3s-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/spot-interrupt-handler.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable --now spot-handler
+
+echo "=== K3s AGENT bootstrap complete ==="
