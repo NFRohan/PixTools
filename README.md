@@ -5,6 +5,12 @@
 ![Kubernetes](https://img.shields.io/badge/Orchestration-K3s-326CE5)
 ![Observability](https://img.shields.io/badge/Observability-Grafana_LGTM-F46800)
 
+<br/>
+<p align="center">
+  <img src="images/pixtools ui.png" alt="PixTools User Interface" width="100%"/>
+</p>
+<br/>
+
 PixTools is a production-grade, distributed asynchronous image-processing system. It is engineered to handle compute-heavy ML inference and standard image operations at scale, prioritizing high availability, operational resilience, and zero-trust deployment pipelines.
 
 **[View Live Demo](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com)** | **[Explore API Docs](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/docs)** | **[Check System Health](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/api/health)**
