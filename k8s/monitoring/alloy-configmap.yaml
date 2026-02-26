@@ -98,3 +98,12 @@ data:
       }]
       forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
     }
+
+    prometheus.exporter.postgres "pixtools_db" {
+      data_source_names = [sys.env("POSTGRES_EXPORTER_URL")]
+    }
+
+    prometheus.scrape "postgres" {
+      targets    = prometheus.exporter.postgres.pixtools_db.targets
+      forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
+    }

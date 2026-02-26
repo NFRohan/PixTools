@@ -122,6 +122,7 @@ sync_runtime_config() {
 
   kubectl -n "${NAMESPACE}" create secret generic pixtools-runtime \
     --from-literal=DATABASE_URL="${database_url}" \
+    --from-literal=POSTGRES_EXPORTER_URL="${database_url/postgresql+asyncpg:\/\//postgresql:\/\/}" \
     --from-literal=REDIS_URL="${redis_url}" \
     --from-literal=RABBITMQ_URL="${rabbitmq_url}" \
     --from-literal=AWS_S3_BUCKET="${aws_s3_bucket}" \

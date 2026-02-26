@@ -74,6 +74,11 @@ spec:
                 secretKeyRef:
                   name: grafana-cloud
                   key: traces_url
+            - name: POSTGRES_EXPORTER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pixtools-runtime
+                  key: POSTGRES_EXPORTER_URL
           readinessProbe:
             httpGet:
               path: /-/ready
