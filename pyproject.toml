@@ -49,6 +49,7 @@ dev = [
     "types-redis>=4.6.0",
     "moto>=5.0.0",
     "aiosqlite>=0.20.0",
+    "pytest-mock>=3.14.0",
 ]
 
 [tool.ruff]
