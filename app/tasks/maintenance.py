@@ -33,7 +33,7 @@ def prune_expired_jobs(self) -> dict:
         with Session(engine) as session:
             result = session.execute(delete(Job).where(Job.created_at < cutoff))
             session.commit()
-            deleted = result.rowcount or 0
+            deleted = result.rowcount or 0  # type: ignore[attr-defined]
         logger.info("Pruned %d jobs older than %s", deleted, cutoff.isoformat())
         return {"deleted": deleted, "cutoff": cutoff.isoformat()}
     except Exception as exc:

@@ -28,7 +28,7 @@ async def _check_redis() -> bool:
     try:
         redis_client = Redis.from_url(settings.redis_url)
         await redis_client.ping()
-        await redis_client.aclose()
+        await redis_client.aclose()  # type: ignore[attr-defined]
         return True
     except Exception:
         logger.error("Health check failed: redis unreachable", exc_info=True)
