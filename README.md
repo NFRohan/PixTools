@@ -34,23 +34,46 @@ Core behavior:
 ## Architecture
 
 ```mermaid
-flowchart LR
-  U[Frontend] --> ALB[ALB Ingress]
-  ALB --> API[FastAPI API]
-  API --> PG[(Postgres / RDS)]
-  API --> REDIS[(Redis)]
-  API --> S3[(S3)]
-  API --> RMQ[(RabbitMQ)]
+flowchart TD
+  subgraph AWS[AWS Cloud]
+    ALB[ALB Ingress]
+    RDS[(PostgreSQL 16\nRDS)]
+    S3[(S3 Buckets)]
+    
+    subgraph K3s[K3s Cluster]
+      subgraph InfraNode[Infra Node (On-Demand t3.small)]
+        ControlPlane[K3s Control Plane]
+        RMQ(RabbitMQ)
+        REDIS(Redis)
+        BEAT(Celery Beat)
+        ALBCtrl(ALB Controller)
+      end
+      
+      subgraph WorkloadNode[Workload Nodes (Spot m7i-flex.large, max 3)]
+        API(FastAPI App)
+        W_STD(Celery Worker Standard)
+        W_ML(Celery Worker ML)
+      end
+    end
+  end
 
-  RMQ --> W1[Celery Worker Standard]
-  RMQ --> W2[Celery Worker ML]
-  RMQ --> B[Celery Beat]
-
-  W1 --> S3
-  W2 --> S3
-  W1 --> PG
-  W2 --> PG
-  B --> PG
+  User[Frontend User] --> ALB
+  ALB --> API
+  API -.->|Idempotency/Locking| REDIS
+  API -.->|Job Tracking| RDS
+  API -->|Publishes Tasks| RMQ
+  API -->|Uploads Image| S3
+  
+  RMQ -->|Consumes| W_STD
+  RMQ -->|Consumes| W_ML
+  
+  W_STD -->|Processes| S3
+  W_ML -->|Infers| S3
+  
+  W_STD -.->|Updates Status| RDS
+  W_ML -.->|Updates Status| RDS
+  
+  BEAT -->|Schedules| RMQ
 ```
 
 ## Runtime Topology
