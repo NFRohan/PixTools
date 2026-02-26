@@ -8,9 +8,7 @@ param(
     [string]$BackendConfig = "",
     [switch]$AutoApprove,
     [switch]$SkipK3sDatastoreReset,
-    [switch]$DestroyBackend,
-    [switch]$DeleteGithubDeployRole,
-    [string]$GithubDeployRoleName = "GitHubActionsPixToolsDeployRole"
+    [switch]$DestroyBackend
 )
 
 Set-StrictMode -Version Latest
@@ -176,11 +174,11 @@ function Invoke-TerraformText {
 function Convert-AwsTextToList {
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text) -or $Text -eq "None") {
-        return ,@()
+        return , @()
     }
-    return ,@(
+    return , @(
         $Text -split '\s+' |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -ne "None" }
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -ne "None" }
     )
 }
 
@@ -190,13 +188,13 @@ function Get-ObjectArrayProperty {
         [Parameter(Mandatory = $true)][string]$PropertyName
     )
     if ($null -eq $Object) {
-        return ,@()
+        return , @()
     }
     $prop = $Object.PSObject.Properties[$PropertyName]
     if ($null -eq $prop -or $null -eq $prop.Value) {
-        return ,@()
+        return , @()
     }
-    return ,@($prop.Value)
+    return , @($prop.Value)
 }
 
 function Resolve-RepoPath {
@@ -567,7 +565,7 @@ function Get-TaggedResourceArns {
     )
 
     if ($null -eq $json) {
-        return ,@()
+        return , @()
     }
 
     $arns = @()
@@ -576,7 +574,7 @@ function Get-TaggedResourceArns {
             $arns += [string]$entry.ResourceARN
         }
     }
-    return ,@($arns | Select-Object -Unique)
+    return , @($arns | Select-Object -Unique)
 }
 
 function Remove-LbcArtifacts {
@@ -590,7 +588,7 @@ function Remove-LbcArtifacts {
     $lbArns = @()
     $lbArns += Get-TaggedResourceArns -ResourceType "elasticloadbalancing:loadbalancer" -TagKey "elbv2.k8s.aws/cluster" -TagValue $ClusterTagValue
     $lbArns += Get-TaggedResourceArns -ResourceType "elasticloadbalancing:loadbalancer" -TagKey "ingress.k8s.aws/stack" -TagValue "pixtools/pixtools"
-    $lbArns = ,@($lbArns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+    $lbArns = , @($lbArns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
 
     foreach ($lbArn in $lbArns) {
         $lbArnValue = [string]$lbArn
@@ -867,47 +865,7 @@ function Remove-SsmPath {
     }
 }
 
-function Remove-GithubDeployRoleArtifacts {
-    param([string]$RoleName)
-    if ([string]::IsNullOrWhiteSpace($RoleName)) {
-        return
-    }
 
-    Write-Info "Deleting IAM role artifacts for $RoleName"
-
-    $inlinePolicies = Invoke-AwsJson -AllowFailure -Args @(
-        "iam", "list-role-policies",
-        "--role-name", $RoleName,
-        "--output", "json"
-    )
-    foreach ($policyName in (Get-ObjectArrayProperty -Object $inlinePolicies -PropertyName "PolicyNames")) {
-        Invoke-AwsText -AllowFailure -Args @(
-            "iam", "delete-role-policy",
-            "--role-name", $RoleName,
-            "--policy-name", [string]$policyName
-        ) | Out-Null
-    }
-
-    $attachedPolicies = Invoke-AwsJson -AllowFailure -Args @(
-        "iam", "list-attached-role-policies",
-        "--role-name", $RoleName,
-        "--output", "json"
-    )
-    foreach ($policy in (Get-ObjectArrayProperty -Object $attachedPolicies -PropertyName "AttachedPolicies")) {
-        if ($null -ne $policy.PolicyArn) {
-            Invoke-AwsText -AllowFailure -Args @(
-                "iam", "detach-role-policy",
-                "--role-name", $RoleName,
-                "--policy-arn", [string]$policy.PolicyArn
-            ) | Out-Null
-        }
-    }
-
-    Invoke-AwsText -AllowFailure -Args @(
-        "iam", "delete-role",
-        "--role-name", $RoleName
-    ) | Out-Null
-}
 
 function Get-BackendConfigValue {
     param(
@@ -1220,9 +1178,7 @@ try {
     Verify-TeardownState -AsgName $serverAsgName -SsmPrefix $ssmPrefix -ClusterTagValue $clusterTag
     Verify-TeardownState -AsgName $agentAsgName -SsmPrefix $ssmPrefix -ClusterTagValue $clusterTag
 
-    if ($DeleteGithubDeployRole) {
-        Remove-GithubDeployRoleArtifacts -RoleName $GithubDeployRoleName
-    }
+
 
     if ($DestroyBackend) {
         if ([string]::IsNullOrWhiteSpace($BackendConfig)) {

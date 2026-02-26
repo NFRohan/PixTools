@@ -28,7 +28,7 @@ resource "aws_iam_role" "github_actions_deploy" {
 }
 
 resource "aws_iam_role_policy" "github_actions_deploy" {
-  name = "pixtools-github-actions-deploy-policy"
+  name = "PixToolsDeployInlinePolicy"
   role = aws_iam_role.github_actions_deploy.id
 
   policy = jsonencode({
