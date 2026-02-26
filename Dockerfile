@@ -6,14 +6,16 @@ WORKDIR /build
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt .
+COPY pyproject.toml README.md ./
+COPY app/ ./app/
+COPY models/ ./models/
 RUN apt-get update && apt-get install -y \
     libheif-dev \
     libaom-dev \
     pkg-config \
     gcc \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir .
 
 # ---------- Stage 2: Runtime ----------
 FROM python:3.12-slim AS runtime
