@@ -157,11 +157,19 @@ jobs:
         id: ingress
         run: |
           INSTANCE_ID="$(scripts/deploy/resolve-k3s-instance.sh)"
-          ALB_HOST="$(scripts/deploy/run-on-ssm.sh "${INSTANCE_ID}" "kubectl -n pixtools get ingress pixtools -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" | tr -d '\r\n' | xargs)"
-          if [ -z "${ALB_HOST}" ] || [[ "${ALB_HOST}" != *.elb.amazonaws.com ]]; then
-            echo "Failed to resolve ALB hostname from ingress." >&2
-            exit 1
-          fi
+          echo "Waiting for ALB hostname allocation..."
+          for i in {1..30}; do
+            ALB_HOST="$(scripts/deploy/run-on-ssm.sh "${INSTANCE_ID}" "kubectl -n pixtools get ingress pixtools -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'" | tr -d '\r\n' | xargs)"
+            if [[ -n "${ALB_HOST}" && "${ALB_HOST}" == *.elb.amazonaws.com ]]; then
+              echo "ALB allocated: ${ALB_HOST}"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Failed to resolve ALB hostname from ingress after 5 minutes." >&2
+              exit 1
+            fi
+            sleep 10
+          done
           echo "alb_host=${ALB_HOST}" >> "$GITHUB_OUTPUT"
 
       - name: Post-deploy smoke test
