@@ -64,12 +64,17 @@ jobs:
           echo "api_image=${API_URI}@${API_DIGEST}" >> "$GITHUB_OUTPUT"
           echo "worker_image=${WORKER_URI}@${WORKER_DIGEST}" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve ALB Security Group ID
+        run: |
+          ALB_SG_ID="$(aws ssm get-parameter --name "/pixtools/${ENVIRONMENT}/alb_security_group_id" --query "Parameter.Value" --output text --region "$AWS_REGION")"
+          echo "ALB_SECURITY_GROUP_ID=${ALB_SG_ID}" >> "$GITHUB_ENV"
+
       - name: Render Kubernetes manifests
         env:
           API_IMAGE: ${{ steps.image.outputs.api_image }}
           WORKER_IMAGE: ${{ steps.image.outputs.worker_image }}
           ALLOWED_INGRESS_CIDRS: ${{ secrets.ALLOWED_INGRESS_CIDRS }}
-          ALB_SECURITY_GROUP_ID: ${{ secrets.ALB_SECURITY_GROUP_ID }}
+          ALB_SECURITY_GROUP_ID: ${{ env.ALB_SECURITY_GROUP_ID }}
         run: |
           chmod +x scripts/deploy/render-manifests.sh
           scripts/deploy/render-manifests.sh build/manifests

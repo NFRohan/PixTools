@@ -85,10 +85,12 @@ jobs:
 
       - name: Dependency vulnerability audit (pip-audit)
         run: |
+          pip install pip-audit
           pip-audit
 
       - name: Static analysis security test (bandit)
         run: |
+          pip install bandit
           bandit -r app -q
 
       - name: Trivy filesystem scan (vuln + secret + misconfig)

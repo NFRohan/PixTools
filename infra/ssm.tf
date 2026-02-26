@@ -180,3 +180,10 @@ resource "aws_ssm_parameter" "k3s_server_ready" {
     ignore_changes = [value]
   }
 }
+
+resource "aws_ssm_parameter" "alb_security_group_id" {
+  name  = "${local.ssm_prefix}/alb_security_group_id"
+  type  = "String"
+  tier  = "Standard"
+  value = aws_security_group.alb.id
+}
