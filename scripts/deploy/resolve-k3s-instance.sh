@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Resolve the K3s SERVER instance ID for CD operations.
-# Filters by Role=k3s-server tag and waits for SSM Online status.
+# Filters by Role=k3s-server tag, running state, and waits for SSM Online status.
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
