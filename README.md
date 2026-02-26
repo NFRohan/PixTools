@@ -54,16 +54,26 @@ flowchart LR
 | **Ingress & API** | AWS ALB Controller -> K3s Pods -> FastAPI | Horizontally scalable edge routing with built-in health probing. |
 | **Message Broker** | RabbitMQ (StatefulSet) | Durable, persistent queueing with Dead Letter Exchanges for failed tasks. |
 | **State & Locking** | Redis & PostgreSQL 16 (AWS RDS) | Separated transient lock/idempotency state (Redis) from persistent job tracking (RDS). |
+| **Control Plane** | **K3s Server on On-Demand EC2** | Ensures cluster stability. Stateful tracking, locking, and control-plane metrics are isolated from the chaos of Spot terminations. |
+| **Data Plane** | **K3s Agents on Spot Fleet** | Scalable `m7i-flex.large` spot instances handle the heavy Celery and API lifting at 70% discount. |
 | **Infrastructure** | Terraform + AWS SSM | 100% declarative IaC. Secrets are never hardcoded; injected securely via Systems Manager Parameter Store. |
-| **CI/CD** | GitHub Actions (OIDC) | Zero-trust deployment pipeline utilizing short-lived STS tokens (no long-lived IAM user keys). |
+| **CI/CD** | GitHub Actions (OIDC) | Zero-trust deployment pipeline utilizing short-lived STS tokens for AWS authentication. |
 
-## System Design & Engineering Highlights
+## The Scale-Up Struggle & Engineering Highlights
 
-* **Asynchronous Orchestration:** Decoupled the FastAPI ingress from heavy compute tasks using RabbitMQ and Celery. Dedicated worker queues (`default_queue` vs. `ml_inference_queue`) prevent long-running ML jobs (like DnCNN denoising) from starving standard conversion tasks.
+### The "Ghost Node" Blackout
+The original architecture relied on a single unified K3s Auto Scaling Group backed by Spot Instances. When AWS inevitably reclaimed the spot instance during heavy ML load, it took down the control plane, RabbitMQ, and the API simultaneously. Deployments would hang forever trying to resolve "Ghost Nodes" that AWS had killed but Kubernetes still thought were `NotReady`. 
+**The Fix:** A massive dual-node re-architecture. The control plane, RabbitMQ, and Redis were moved to a stable, on-demand `infra` node. The heavy-lifting API and Celery workers were moved to a scalable array of Spot `workload` nodes. If AWS kills a spot instance now, Celery gracefully requeues the task, the control plane stays alive, and the user never notices.
+
+### Dynamic Infrastructure as Code
+Early iterations of the CI/CD pipeline relied on hardcoded GitHub Secrets for things like the AWS Load Balancer Security Group ID. When Terraform naturally destroyed and recreated these resources during the dual-node architecture shift, the pipeline broke natively trying to attach ALBs to ghost security groups.
+**The Fix:** Fully dynamic state resolution. Terraform now provisions and writes the exact `alb_security_group_id` directly to AWS Systems Manager (SSM) Parameter Store. The GitHub Actions CD pipeline queries SSM at runtime, completely eliminating out-of-sync credential drift.
+
+### Additional Highlights:
+* **Asynchronous Orchestration:** Decoupled the FastAPI ingress from heavy compute tasks using RabbitMQ and Celery. Dedicated worker queues (`default_queue` vs. `ml_inference_queue`) prevent long-running ML jobs from starving standard conversion tasks.
 * **Idempotency & Fault Tolerance:** Implemented `Idempotency-Key` headers backed by Redis to guarantee safe retries across distributed network drops. 
 * **Resilient Webhook Callbacks:** Integrated `pybreaker` circuit breakers to protect the worker nodes from cascading failures when client webhook endpoints are unreachable or slow.
-* **Cloud-Native Observability:** Instrumented with OpenTelemetry, shipping logs, metrics, and traces to a Grafana Cloud LGTM stack via a lightweight Alloy DaemonSet, ensuring complete visibility without burdening the K3s node.
-* **Cost-Optimized Compute:** Deployed on an AWS Auto Scaling Group utilizing highly ephemeral `m7i-flex.large` Spot Instances, achieving production-like architecture at a fraction of on-demand costs.
+* **Cloud-Native Observability:** Instrumented with OpenTelemetry, shipping logs, metrics, and traces to a Grafana Cloud LGTM stack via a lightweight Alloy DaemonSet.
 
 ## API Contract
 
@@ -245,8 +255,9 @@ If unset, deploy logic falls back to `/pixtools/dev/grafana_cloud_stack_id`.
 Set in the `dev` environment:
 - `AWS_DEPLOY_ROLE_ARN`
 - `MANIFEST_BUCKET`
-- `ALB_SECURITY_GROUP_ID`
 - `ALLOWED_INGRESS_CIDRS`
+
+*(Note: `ALB_SECURITY_GROUP_ID` is no longer a secret; it is fetched dynamically from SSM at runtime to prevent Terraform drift!)*
 
 For public demo access:
 - `ALLOWED_INGRESS_CIDRS=0.0.0.0/0`
@@ -291,7 +302,6 @@ Optional flags:
 - By default teardown resets the external K3s datastore DB (`k3s_state`) via SSM before destroying infra to avoid stale control-plane state on next deploy.
 - `-SkipK3sDatastoreReset` to disable that DB reset.
 - `-DestroyBackend` to also remove Terraform backend S3 state bucket and lock table.
-- `-DeleteGithubDeployRole` to delete the GitHub deploy IAM role (`GitHubActionsPixToolsDeployRole` by default).
 
 ## Security Notes
 
