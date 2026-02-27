@@ -88,6 +88,16 @@ flowchart TD
 | **Infrastructure** | Terraform + AWS SSM | 100% declarative IaC. Secrets are never hardcoded; injected securely via Systems Manager Parameter Store. |
 | **CI/CD** | GitHub Actions (OIDC) | Zero-trust deployment pipeline utilizing short-lived STS tokens for AWS authentication. |
 
+**AWS EC2 Instances** — On-demand `t3.small` infra node + Spot `m7i-flex.large` workload node, both healthy with 3/3 checks passed.
+<p align="center">
+  <img src="images/aws instances.png" alt="AWS EC2 Instances" width="100%"/>
+</p>
+
+**K3s Cluster Nodes** — Both nodes `Ready`, running K3s `v1.34.4+k3s1` on Amazon Linux 2023.
+<p align="center">
+  <img src="images/kubectl nodes.png" alt="kubectl get nodes" width="100%"/>
+</p>
+
 ## The Scale-Up Struggle & Engineering Highlights
 
 ### The "Ghost Node" Blackout
@@ -290,6 +300,11 @@ The full LGTM stack (Logs, Grafana, Traces, Metrics) is shipped from the cluster
   <img src="images/grafana tracing.png" alt="Grafana Tempo Distributed Tracing" width="100%"/>
 </p>
 
+**Full Job Trace Waterfall** — A single `POST /api/process` request traced end-to-end (9.52s): API ingress → task fan-out (`convert_webp`, `convert_avif`) → `finalize_job` → `bundle_results` → response. 33 spans across the full lifecycle.
+<p align="center">
+  <img src="images/full trace.png" alt="Full Job Trace Waterfall" width="100%"/>
+</p>
+
 **Centralized Logs** — All pod logs aggregated via Loki with structured fields for correlation — filter by job ID, task name, or processing duration.
 <p align="center">
   <img src="images/Grafana Loki Logs.png" alt="Grafana Loki Centralized Logs" width="100%"/>
@@ -301,6 +316,11 @@ The full LGTM stack (Logs, Grafana, Traces, Metrics) is shipped from the cluster
 </p>
 
 ### GitHub Actions pipelines
+
+**Full CD Pipeline** — End-to-end green deployment: OIDC auth → ECR push → manifest render → S3 sync → SSM deploy → smoke test.
+<p align="center">
+  <img src="images/CD Green.png" alt="GitHub Actions CD Pipeline" width="100%"/>
+</p>
 
 - `CI` (`.github/workflows/ci.yaml`)
   - `ruff`
