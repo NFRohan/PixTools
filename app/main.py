@@ -57,15 +57,20 @@ def create_app() -> FastAPI:
     register_request_id_middleware(application)
     register_request_metrics_middleware(application)
 
+    # --- Observability ---
+    # IMPORTANT: must run before router imports, because importing
+    # app.routers.jobs triggers celery_app module-level code that
+    # calls setup_celery_observability() and sets the global OTel
+    # tracer provider to "pixtools-worker". OTel only allows
+    # set_tracer_provider() once; subsequent calls are no-ops.
+    setup_api_observability(application)
+
     # --- Register routers ---
     from app.routers.health import router as health_router
     from app.routers.jobs import router as jobs_router
 
     application.include_router(jobs_router, prefix="/api")
     application.include_router(health_router, prefix="/api")
-
-    # --- Observability ---
-    setup_api_observability(application)
 
     # --- Mount static frontend ---
     if STATIC_DIR.exists():
