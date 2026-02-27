@@ -47,15 +47,21 @@ flowchart TD
         REDIS(Redis)
         BEAT(Celery Beat)
         ALBCtrl(ALB Controller)
+        CEXP(Celery Exporter)
       end
       
       subgraph WorkloadNode["Workload Nodes (Spot m7i-flex.large, max 3)"]
         API(FastAPI App)
         W_STD(Celery Worker Standard)
         W_ML(Celery Worker ML)
+        NTH(AWS Node Termination Handler)
       end
+
+      ALLOY(Alloy DaemonSet)
     end
   end
+
+  GrafanaCloud["☁️ Grafana Cloud (Logs, Metrics, Traces)"]
 
   User[Frontend User] --> ALB
   ALB --> API
@@ -74,6 +80,11 @@ flowchart TD
   W_ML -.->|Updates Status| RDS
   
   BEAT -->|Schedules| RMQ
+  CEXP -.->|Reads Events| RMQ
+  ALLOY -->|Scrapes| API
+  ALLOY -->|Scrapes| CEXP
+  ALLOY ==>|Ships Telemetry| GrafanaCloud
+  NTH -.->|Cordons & Drains| ControlPlane
 ```
 
 ## Runtime Topology
@@ -84,7 +95,9 @@ flowchart TD
 | **Message Broker** | RabbitMQ (StatefulSet) | Durable, persistent queueing with Dead Letter Exchanges for failed tasks. |
 | **State & Locking** | Redis & PostgreSQL 16 (AWS RDS) | Separated transient lock/idempotency state (Redis) from persistent job tracking (RDS). |
 | **Control Plane** | **K3s Server on On-Demand EC2** | Ensures cluster stability. Stateful tracking, locking, and control-plane metrics are isolated from the chaos of Spot terminations. |
-| **Data Plane** | **K3s Agents on Spot Fleet** | Scalable `m7i-flex.large` spot instances handle the heavy Celery and API lifting at 70% discount. |
+| **Data Plane** | **K3s Agents on Spot Fleet** | Scalable `m7i-flex.large` spot instances handle the heavy Celery and API lifting at ~70% discount. |
+| **Spot Resilience** | AWS Node Termination Handler (NTH) | DaemonSet listens for IMDS 2-minute warnings and gracefully cordons, taints, and drains nodes before termination. |
+| **Observability** | Alloy → Grafana Cloud (LGTM) | Metrics (Prometheus), logs (Loki), and traces (Tempo) shipped via a single Alloy DaemonSet. Celery Exporter bridges worker metrics. |
 | **Infrastructure** | Terraform + AWS SSM | 100% declarative IaC. Secrets are never hardcoded; injected securely via Systems Manager Parameter Store. |
 | **CI/CD** | GitHub Actions (OIDC) | Zero-trust deployment pipeline utilizing short-lived STS tokens for AWS authentication. |
 
@@ -405,18 +418,25 @@ Optional flags:
 
 ```text
 app/
-  routers/         FastAPI endpoints
+  routers/         FastAPI endpoints (health, jobs)
   services/        S3, idempotency, webhook, DAG builder
-  tasks/           Celery workers (image, metadata, archive, finalize, maintenance, ML)
+  tasks/           Celery tasks (image_ops, ml_ops, metadata, archive, finalize, maintenance)
   static/          Frontend (HTML/CSS/JS)
-  ml/              DnCNN definition
+  ml/              DnCNN model definition
+  observability.py OpenTelemetry + Prometheus metrics wiring
+  middleware.py    Request ID + metrics middleware
 alembic/           Schema migrations
-infra/             Terraform IaC
-k8s/               Kubernetes manifests templates
-scripts/deploy/    Manifest rendering and SSM deploy helpers
-scripts/teardown/  Full environment teardown helpers
+infra/             Terraform IaC (VPC, EC2, RDS, IAM, SSM, Security Groups)
+  templates/       EC2 user data scripts for K3s server + agent bootstrap
+k8s/               Kubernetes manifests
+  monitoring/      Alloy, Celery Exporter, AWS Node Termination Handler
+  workers/         Celery Standard, ML, and Beat deployments
+  api/             FastAPI Deployment, Service, HPA
+scripts/deploy/    Manifest rendering, SSM reconciliation, and deploy helpers
+scripts/teardown/  Full environment teardown (PowerShell)
 bench/             k6 benchmark scenarios and measurement playbook
-tests/             Unit/integration tests
+tests/             Unit and integration tests
+images/            README screenshots (UI, Grafana, AWS, CI/CD)
 ```
 
 ## Troubleshooting
@@ -458,7 +478,9 @@ docker compose logs -f migrate
 
 ## About This Project
 
-PixTools was built from scratch to demonstrate full-lifecycle cloud engineering capabilities. Rather than relying on managed PaaS providers (like Heroku or Vercel), I chose to architect the underlying VPC, subnets, Kubernetes cluster, and CI/CD pipelines directly in AWS using Terraform. This project serves as a practical demonstration of handling distributed system complexities, secure IAM federation, and advanced observability. 
+PixTools was built from scratch to demonstrate full-lifecycle cloud engineering — not just application code, but the entire platform beneath it. Rather than relying on managed PaaS providers, every layer is hand-architected: the VPC topology, subnet routing, EC2 launch templates, RDS provisioning, K3s cluster bootstrapping, IAM OIDC federation, and CI/CD pipelines — all defined declaratively in Terraform and deployed through zero-trust GitHub Actions workflows.
+
+The engineering war stories in this README are real. Every debugging session, every 502 mystery, every flatlined metric — they all happened in the process of getting this system to production-grade reliability on a budget of two EC2 instances and a lot of persistence.
 
 ## License
 
