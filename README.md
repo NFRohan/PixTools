@@ -35,13 +35,13 @@ Core behavior:
 
 ```mermaid
 flowchart TD
-  subgraph AWS[AWS Cloud]
+  subgraph AWS["AWS Cloud"]
     ALB[ALB Ingress]
     RDS[(PostgreSQL 16\nRDS)]
     S3[(S3 Buckets)]
     
-    subgraph K3s[K3s Cluster]
-      subgraph InfraNode[Infra Node (On-Demand t3.small)]
+    subgraph K3s["K3s Cluster"]
+      subgraph InfraNode["Infra Node (On-Demand t3.small)"]
         ControlPlane[K3s Control Plane]
         RMQ(RabbitMQ)
         REDIS(Redis)
@@ -49,7 +49,7 @@ flowchart TD
         ALBCtrl(ALB Controller)
       end
       
-      subgraph WorkloadNode[Workload Nodes (Spot m7i-flex.large, max 3)]
+      subgraph WorkloadNode["Workload Nodes (Spot m7i-flex.large, max 3)"]
         API(FastAPI App)
         W_STD(Celery Worker Standard)
         W_ML(Celery Worker ML)
