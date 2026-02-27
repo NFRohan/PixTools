@@ -40,11 +40,11 @@ resource "aws_security_group" "k3s_node" {
   }
 
   ingress {
-    description = "Intra-node communication"
+    description = "Self-reference: Allow all internal traffic between nodes"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = [aws_vpc.main.cidr_block]
+    self        = true
   }
 
   egress {
