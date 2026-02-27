@@ -107,3 +107,11 @@ data:
       targets    = prometheus.exporter.postgres.pixtools_db.targets
       forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
     }
+
+    prometheus.scrape "pixtools_celery" {
+      targets = [{
+        __address__ = "celery-exporter.pixtools.svc.cluster.local:9808",
+        job         = "pixtools-celery",
+      }]
+      forward_to = [prometheus.remote_write.grafana_cloud_metrics.receiver]
+    }

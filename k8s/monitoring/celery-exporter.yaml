@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-exporter
+  namespace: pixtools
+  labels:
+    app: celery-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-exporter
+  template:
+    metadata:
+      labels:
+        app: celery-exporter
+    spec:
+      nodeSelector:
+        pixtools-workload-infra: "true"
+      containers:
+        - name: exporter
+          image: danihodovic/celery-exporter:v1.7.0
+          args:
+            - "--broker-url=$(RABBITMQ_URL)"
+            - "--retry-interval=5"
+          ports:
+            - containerPort: 9808
+              name: metrics
+          envFrom:
+            - secretRef:
+                name: pixtools-runtime
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: celery-exporter
+  namespace: pixtools
+  labels:
+    app: celery-exporter
+spec:
+  ports:
+    - port: 9808
+      targetPort: 9808
+      name: metrics
+  selector:
+    app: celery-exporter
