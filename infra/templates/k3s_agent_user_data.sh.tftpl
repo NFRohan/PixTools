@@ -76,62 +76,16 @@ curl -sfL https://get.k3s.io | \
   K3S_URL="$${K3S_SERVER_URL}" \
   K3S_TOKEN="$${K3S_TOKEN}" \
   INSTALL_K3S_EXEC="agent \
-    --kubelet-arg=provider-id=$${PROVIDER_ID}" \
+    --kubelet-arg=provider-id=$${PROVIDER_ID} \
+    --node-label=pixtools-workload-app=true" \
   sh -
 
 echo "K3s agent installed and joined cluster."
 
-# ---- Spot Interruption Handler ----
-cat <<'HANDLER' >/usr/local/bin/spot-interrupt-handler.sh
-#!/bin/bash
-set -euo pipefail
-
-METADATA_IP="169.254.169.254"
-TOKEN="$(curl -s -X PUT "http://$${METADATA_IP}/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
-
-check_interrupt() {
-  if [ -n "$${TOKEN}" ]; then
-    curl -sf -H "X-aws-ec2-metadata-token: $${TOKEN}" "http://$${METADATA_IP}/latest/meta-data/spot/instance-action" >/dev/null
-  else
-    curl -sf "http://$${METADATA_IP}/latest/meta-data/spot/instance-action" >/dev/null
-  fi
-}
-
-while true; do
-  if check_interrupt; then
-    logger "Spot interruption notice received, draining node"
-    NODE_NAME="$(hostname)"
-    # Use the server's kubectl — agent doesn't have it
-    # The drain is best-effort; Celery's task_acks_late will requeue in-flight tasks
-    curl -sfL https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl-drain 2>/dev/null || true
-    chmod +x /usr/local/bin/kubectl-drain 2>/dev/null || true
-    if [ -x /usr/local/bin/kubectl-drain ]; then
-      /usr/local/bin/kubectl-drain drain "$${NODE_NAME}" --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true
-    fi
-    sleep 120
-  fi
-  sleep 5
-done
-HANDLER
-
-chmod +x /usr/local/bin/spot-interrupt-handler.sh
-
-cat <<'SERVICE' >/etc/systemd/system/spot-handler.service
-[Unit]
-Description=EC2 Spot Interruption Handler
-After=k3s-agent.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/spot-interrupt-handler.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-systemctl daemon-reload
-systemctl enable --now spot-handler
+# NOTE: Spot interruption handling is managed by the AWS Node Termination
+# Handler (NTH) DaemonSet deployed via k8s/monitoring/aws-node-termination-handler.yaml.
+# NTH listens to IMDS for the 2-minute warning and gracefully cordons + drains
+# the node at the Kubernetes level — no custom systemd service needed.
 
 echo "=== K3s AGENT bootstrap complete ==="
+
