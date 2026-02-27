@@ -98,6 +98,24 @@ The original architecture relied on a single unified K3s Auto Scaling Group back
 Early iterations of the CI/CD pipeline relied on hardcoded GitHub Secrets for things like the AWS Load Balancer Security Group ID. When Terraform naturally destroyed and recreated these resources during the dual-node architecture shift, the pipeline broke natively trying to attach ALBs to ghost security groups.
 **The Fix:** Fully dynamic state resolution. Terraform now provisions and writes the exact `alb_security_group_id` directly to AWS Systems Manager (SSM) Parameter Store. The GitHub Actions CD pipeline queries SSM at runtime, completely eliminating out-of-sync credential drift.
 
+### The Kubelet Proxy 502 Mystery
+After the dual-node split, `kubectl logs` and Grafana Alloy's log tailing started returning `502 Bad Gateway` for every pod on the workload nodes. The K3s API server was proxying to the agent's kubelet on port `10250`, but the underlying TCP connection was being silently dropped by AWS.
+**Root Cause:** On AWS EC2, nodes in different subnets can route to each other via their *public* IPs — even within the same VPC. When traffic hairpins through the public internet, it no longer matches VPC CIDR-based security group rules. The packets arrive from a public IP that the security group doesn't recognize.
+**The Fix:** Switched the K3s node security group from a CIDR-based ingress rule to a **self-referencing** security group rule (`self = true`). This tells AWS "any resource attached to *this* security group can talk to any other resource attached to *this* security group" — regardless of which IP address the traffic arrives from.
+
+### The Celery Metrics Flatline
+Grafana dashboards showed `pixtools_job_end_to_end_seconds_sum` stuck permanently at `0`, even while jobs were visibly completing. The API pod's `/metrics` endpoint was being scraped perfectly by Alloy, so why was everything zero?
+**Root Cause:** The FastAPI app and Celery workers share the same codebase. When the API boots, it imports the task files and *registers* the Prometheus metric in its own memory. Alloy scrapes it, sees it exists, and reports it — but the API only *queues* jobs, it doesn't *execute* them. The actual work happens inside the Celery worker processes, which have no embedded HTTP server and no `/metrics` endpoint.
+**The Fix:** Deployed a dedicated [`celery-exporter`](https://github.com/danihodovic/celery-exporter) container that connects directly to the RabbitMQ broker and translates queue depths, task completions, and execution times into Prometheus metrics. Added a matching Alloy scrape job, and injected `CELERY_WORKER_SEND_TASK_EVENTS=True` into the worker ConfigMap so workers actually emit the events the exporter listens for.
+
+### The 2-Minute Warning (Spot Resilience)
+The original spot instance handler was a hand-rolled bash script running as a `systemd` service inside the EC2 user data. It polled the IMDS metadata endpoint every 5 seconds, and when it detected a termination notice, it attempted to download `kubectl` from the internet and run a best-effort `kubectl drain`. On a dying node with degraded networking, this frequently failed silently.
+**The Fix:** Replaced the entire custom handler with the official [AWS Node Termination Handler (NTH)](https://github.com/aws/aws-node-termination-handler) deployed as a Kubernetes DaemonSet. NTH runs *inside* the cluster with proper RBAC, listens to IMDS natively via `hostNetwork: true`, and on a spot interruption notice: cordons the node, taints it to prevent new scheduling, gracefully evicts all pods, and lets Kubernetes reschedule them — all within the 2-minute warning window.
+
+### The Ghost Label Problem
+New spot agent nodes would join the K3s cluster successfully, but pods requiring `nodeSelector: pixtools-workload-app=true` would stay stuck in `Pending` indefinitely. The `reconcile-cluster.sh` script *did* label nodes by querying EC2 tags, but it only ran during initial deployment — not when a fresh spot instance replaced a terminated one mid-day.
+**The Fix:** Baked the label directly into the K3s agent install command using `--node-label=pixtools-workload-app=true` in the EC2 user data template. Now every agent node is instantly schedulable the moment it joins the cluster, with zero reliance on external labeling scripts.
+
 ### Additional Highlights:
 * **Asynchronous Orchestration:** Decoupled the FastAPI ingress from heavy compute tasks using RabbitMQ and Celery. Dedicated worker queues (`default_queue` vs. `ml_inference_queue`) prevent long-running ML jobs from starving standard conversion tasks.
 * **Idempotency & Fault Tolerance:** Implemented `Idempotency-Key` headers backed by Redis to guarantee safe retries across distributed network drops. 
