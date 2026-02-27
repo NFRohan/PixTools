@@ -44,7 +44,7 @@ resource "aws_security_group" "k3s_node" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    self        = true
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   egress {
