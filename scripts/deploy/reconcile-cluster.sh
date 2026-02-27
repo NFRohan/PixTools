@@ -155,6 +155,8 @@ sync_runtime_config() {
     --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT="http://alloy.pixtools.svc.cluster.local:4318" \
     --from-literal=OTEL_SERVICE_NAME_API="pixtools-api" \
     --from-literal=OTEL_SERVICE_NAME_WORKER="pixtools-worker" \
+    --from-literal=CELERY_WORKER_SEND_TASK_EVENTS="True" \
+    --from-literal=CELERY_TASK_SEND_SENT_EVENT="True" \
     --dry-run=client -o yaml | kubectl apply -f -
 }
 
