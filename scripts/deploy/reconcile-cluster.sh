@@ -230,6 +230,7 @@ apply_manifests() {
     "${MANIFEST_DIR}/monitoring/alloy-configmap.yaml"
     "${MANIFEST_DIR}/monitoring/alloy-service.yaml"
     "${MANIFEST_DIR}/monitoring/alloy-deployment.yaml"
+    "${MANIFEST_DIR}/monitoring/celery-exporter.yaml"
     "${MANIFEST_DIR}/api/service.yaml"
     "${MANIFEST_DIR}/api/deployment.yaml"
     "${MANIFEST_DIR}/api/hpa.yaml"
