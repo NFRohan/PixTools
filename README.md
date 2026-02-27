@@ -276,6 +276,30 @@ Optional per-signal username overrides:
 
 If unset, deploy logic falls back to `/pixtools/dev/grafana_cloud_stack_id`.
 
+### Observability in Action
+
+The full LGTM stack (Logs, Grafana, Traces, Metrics) is shipped from the cluster via a lightweight Alloy DaemonSet to Grafana Cloud.
+
+**API & Worker Metrics** — Real-time throughput, p99 latency, RabbitMQ task backlog, and end-to-end job processing times.
+<p align="center">
+  <img src="images/grafana api.png" alt="Grafana API & Worker Metrics Dashboard" width="100%"/>
+</p>
+
+**Distributed Tracing** — OpenTelemetry traces from the FastAPI app and Celery workers, visualized in Grafana Tempo with span rate breakdowns and duration histograms.
+<p align="center">
+  <img src="images/grafana tracing.png" alt="Grafana Tempo Distributed Tracing" width="100%"/>
+</p>
+
+**Centralized Logs** — All pod logs aggregated via Loki with structured fields for correlation — filter by job ID, task name, or processing duration.
+<p align="center">
+  <img src="images/Grafana Loki Logs.png" alt="Grafana Loki Centralized Logs" width="100%"/>
+</p>
+
+**System & Database Health** — Postgres Exporter status, Python GC activity for leak detection, OTel span throughput, network TX/RX, and per-component memory usage.
+<p align="center">
+  <img src="images/sys and db.png" alt="System and Database Health Dashboard" width="100%"/>
+</p>
+
 ### GitHub Actions pipelines
 
 - `CI` (`.github/workflows/ci.yaml`)
