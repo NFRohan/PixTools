@@ -67,6 +67,7 @@ celery_app.conf.task_queues = [
 # --- Routing table ---
 ml_queue_name = "ml_inference_queue" if settings.ml_queue_isolation_enabled else "default_queue"
 celery_app.conf.task_routes = {
+    "app.tasks.router.*": {"queue": "default_queue"},
     "app.tasks.ml_ops.denoise": {"queue": ml_queue_name},
     "app.tasks.image_ops.*": {"queue": "default_queue"},
     "app.tasks.archive.*": {"queue": "default_queue"},
@@ -132,6 +133,7 @@ import app.tasks.image_ops  # noqa: E402,F401
 import app.tasks.maintenance  # noqa: E402,F401
 import app.tasks.metadata  # noqa: E402,F401
 import app.tasks.ml_ops  # noqa: E402,F401
+import app.tasks.router  # noqa: E402,F401
 
 
 @after_setup_logger.connect

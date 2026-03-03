@@ -4,6 +4,7 @@ import pytest
 from PIL import Image
 
 from app.models import Job, JobStatus
+from app.tasks.celery_app import celery_app
 from app.tasks.image_ops import convert_webp
 
 
@@ -36,6 +37,11 @@ def test_convert_webp_logic(mock_image):
         args, kwargs = mock_ul.call_args
         assert args[3] == "WEBP" # fmt argument
         assert kwargs["save_kwargs"]["quality"] == 72
+
+
+def test_router_task_is_registered():
+    """The Go API publishes this task name directly; workers must register it."""
+    assert "app.tasks.router.start_pipeline" in celery_app.tasks
 
 def test_finalize_job_logic(db_session):
     """Test the job finalization logic and DB updates."""
