@@ -51,7 +51,9 @@ func NewS3Service(ctx context.Context, region, endpoint, accessKey, secretKey, b
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.UsePathStyle = true // Needed for LocalStack
+		if endpoint != "" {
+			o.UsePathStyle = true // Needed for LocalStack/Minio
+		}
 	})
 
 	presignCli := s3.NewPresignClient(client)

@@ -195,7 +195,9 @@ jobs:
             sleep 10
           done
 
+          API_KEY="$(aws ssm get-parameter --name "/pixtools/dev/api_key" --with-decryption --query "Parameter.Value" --output text)"
           PROCESS_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/api/process" \
+            -H "X-API-Key: ${API_KEY}" \
             -H "Idempotency-Key: smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             -F "file=@test_image.png;type=image/png" \
             -F "operations=[\"webp\"]")"
@@ -207,7 +209,7 @@ jobs:
           fi
 
           for i in {1..60}; do
-            JOB_RESPONSE="$(curl -fsS "${BASE_URL}/api/jobs/${JOB_ID}")"
+            JOB_RESPONSE="$(curl -fsS -H "X-API-Key: ${API_KEY}" "${BASE_URL}/api/jobs/${JOB_ID}")"
             STATUS="$(python -c "import json,sys; print(json.loads(sys.stdin.read())['status'])" <<<"${JOB_RESPONSE}")"
             if [ "${STATUS}" = "COMPLETED" ] || [ "${STATUS}" = "COMPLETED_WEBHOOK_FAILED" ]; then
               echo "Smoke job ${JOB_ID} completed with status ${STATUS}"
