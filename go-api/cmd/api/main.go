@@ -41,7 +41,7 @@ func main() {
 	}
 
 	// 4. Connect to RabbitMQ (Celery)
-	celerySvc, err := services.NewCeleryService(cfg.RabbitMQURL)
+	celerySvc, err := services.NewCeleryService(cfg.RabbitMQURL, cfg.RedisURL)
 	if err != nil {
 		log.Fatalf("Failed to start celery client: %v", err)
 	}

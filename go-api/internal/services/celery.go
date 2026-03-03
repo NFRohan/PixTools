@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gocelery/gocelery"
+	"github.com/gomodule/redigo/redis"
 )
 
 type CeleryService struct {
@@ -12,10 +13,34 @@ type CeleryService struct {
 }
 
 // NewCeleryService creates a Celery client that publishes to our RabbitMQ instance
-func NewCeleryService(rabbitmqURL string) (*CeleryService, error) {
-	// Initialize celery client using AMQP (RabbitMQ)
+func NewCeleryService(rabbitmqURL, redisURL string) (*CeleryService, error) {
+	// 1. Initialize Redis Backend (Celery store results in Redis)
+	redisPool := &redis.Pool{
+		MaxIdle:     3,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			return redis.DialURL(redisURL)
+		},
+	}
+	celeryBackend := gocelery.NewRedisBackend(redisPool)
+
+	// 2. Initialize AMQP Broker with custom exchange settings to match Python
+	// Python Celery uses Exchange("default", type="direct", auto_delete=False)
 	celeryBroker := gocelery.NewAMQPCeleryBroker(rabbitmqURL)
-	celeryBackend := gocelery.NewAMQPCeleryBackend(rabbitmqURL)
+
+	// Manually configure exchange and queue to avoid the PRECONDITION_FAILED (406) error
+	// gocelery defaults auto_delete to true, which conflicts with Celery's default of false.
+	celeryBroker.Exchange = &gocelery.AMQPExchange{
+		Name:       "default",
+		Type:       "direct",
+		Durable:    true,
+		AutoDelete: false, // Match Python!
+	}
+	celeryBroker.Queue = &gocelery.AMQPQueue{
+		Name:       "default", // This is the routing key/queue name used by default for task emission
+		Durable:    true,
+		AutoDelete: false,
+	}
 
 	client, err := gocelery.NewCeleryClient(celeryBroker, celeryBackend, 1)
 	if err != nil {

@@ -54,6 +54,7 @@ normalize_url() {
 # ============================================================
 sync_manifests() {
   log "Syncing manifests from s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}"
+  rm -rf "${MANIFEST_DIR}"
   mkdir -p "${MANIFEST_DIR}"
   aws s3 sync "s3://${MANIFEST_BUCKET}/${MANIFEST_PREFIX}" "${MANIFEST_DIR}" --delete --region "${AWS_REGION}"
 }
