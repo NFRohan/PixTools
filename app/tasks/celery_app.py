@@ -138,7 +138,11 @@ def _get_sync_engine():
     return _sync_engine
 
 
-def _set_job_status(job_id: str | None, status: JobStatus, error_message: str | None = None) -> None:
+def _set_job_status(
+    job_id: str | None,
+    status: JobStatus,
+    error_message: str | None = None,
+) -> None:
     if not job_id:
         return
 
