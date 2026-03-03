@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"gorm.io/gorm"
@@ -41,8 +43,32 @@ func NewServer(cfg *config.Config, db *gorm.DB, celery *services.CeleryService, 
 	return srv
 }
 
+func (s *Server) apiKeyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.Config.APIKey == "" {
+			c.Next()
+			return
+		}
+
+		key := c.GetHeader("X-API-Key")
+		if key == "" {
+			// Fallback to query param if needed, or keep it strict
+			key = c.Query("api_key")
+		}
+
+		if key != s.Config.APIKey {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"detail": "Invalid or missing API Key"})
+			return
+		}
+		c.Next()
+	}
+}
+
 func (s *Server) setupRoutes() {
 	api := s.Router.Group("/api")
+	if s.Config.APIKey != "" {
+		api.Use(s.apiKeyMiddleware())
+	}
 	{
 		api.GET("/health", s.HealthCheck)
 		api.POST("/process", s.CreateJob)

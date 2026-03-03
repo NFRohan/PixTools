@@ -21,6 +21,7 @@ type Config struct {
 	S3EndpointURL        string
 	AWSAccessKeyID       string
 	AWSSecretAccessKey   string
+	APIKey               string
 	MaxUploadBytes       int64
 	AcceptedMimeTypes    []string
 	ObservabilityEnabled bool
@@ -56,10 +57,11 @@ func LoadConfig() (*Config, error) {
 		RabbitMQPass:         getEnvOrDefault("RABBITMQ_DEFAULT_PASS", "guest"),
 		AWSDefaultRegion:     getEnvOrDefault("AWS_DEFAULT_REGION", "us-east-1"),
 		AWSRegion:            getEnvOrDefault("AWS_REGION", "us-east-1"),
-		S3BucketName:         getEnvOrDefault("S3_BUCKET_NAME", "pixtools-local-bucket"),
+		S3BucketName:         getEnvOrDefault("AWS_S3_BUCKET", getEnvOrDefault("S3_BUCKET_NAME", "pixtools-local-bucket")),
 		S3EndpointURL:        os.Getenv("S3_ENDPOINT_URL"), // Empty is fine for real AWS
-		AWSAccessKeyID:       getEnvOrDefault("AWS_ACCESS_KEY_ID", "test"),
-		AWSSecretAccessKey:   getEnvOrDefault("AWS_SECRET_ACCESS_KEY", "test"),
+		AWSAccessKeyID:       os.Getenv("AWS_ACCESS_KEY_ID"),
+		AWSSecretAccessKey:   os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		APIKey:               os.Getenv("API_KEY"),
 		MaxUploadBytes:       maxUpload,
 		AcceptedMimeTypes:    mimeTypes,
 		ObservabilityEnabled: obsEnabled,
