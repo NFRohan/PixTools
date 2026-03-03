@@ -19,7 +19,7 @@ spec:
         pixtools-workload-infra: "true"
       containers:
         - name: exporter
-          image: danihodovic/celery-exporter:v1.7.0
+          image: danihodovic/celery-exporter:latest
           args:
             - "--broker-url=$(RABBITMQ_URL)"
             - "--retry-interval=5"
