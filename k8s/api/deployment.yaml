@@ -24,21 +24,10 @@ spec:
         pixtools-workload-app: "true"
       imagePullSecrets:
         - name: ecr-pull
-      initContainers:
-        - name: migrate
-          image: __API_IMAGE__
-          imagePullPolicy: IfNotPresent
-          command: ["alembic", "upgrade", "head"]
-          envFrom:
-            - configMapRef:
-                name: pixtools-config
-            - secretRef:
-                name: pixtools-runtime
       containers:
         - name: api
           image: __API_IMAGE__
           imagePullPolicy: IfNotPresent
-          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
           ports:
             - containerPort: 8000
           envFrom:
