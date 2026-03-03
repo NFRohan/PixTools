@@ -1,189 +1,190 @@
-# PixTools: Distributed Image Processing Platform
+# PixTools
 
-![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-blue)
-![Infrastructure](https://img.shields.io/badge/IaC-Terraform-623CE4)
-![Kubernetes](https://img.shields.io/badge/Orchestration-K3s-326CE5)
-![Observability](https://img.shields.io/badge/Observability-Grafana_LGTM-F46800)
+![CI](https://img.shields.io/badge/CI-GitHub_Actions-blue)
+![CD](https://img.shields.io/badge/CD-GitHub_Actions-blue)
+![IaC](https://img.shields.io/badge/IaC-Terraform-623CE4)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-K3s-326CE5)
+![Observability](https://img.shields.io/badge/Observability-Grafana_Cloud-F46800)
 
-<br/>
 <p align="center">
-  <img src="images/pixtools ui.png" alt="PixTools User Interface" width="100%"/>
+  <img src="images/pixtools ui.png" alt="PixTools UI" width="100%"/>
 </p>
-<br/>
 
-PixTools is a production-grade, distributed asynchronous image-processing system. It is engineered to handle compute-heavy ML inference and standard image operations at scale, prioritizing high availability, operational resilience, and zero-trust deployment pipelines.
+PixTools is a distributed image-processing system built to demonstrate real cloud and distributed-systems engineering, not just CRUD API work.
 
-**[View Live Demo](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com)** | **[Explore API Docs](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/docs)** | **[Check System Health](http://k8s-pixtools-pixtools-f106dc8583-233935853.us-east-1.elb.amazonaws.com/api/health)**
+It accepts image-processing jobs over HTTP, persists job state in Postgres, publishes asynchronous work to RabbitMQ, executes the pipeline in Python Celery workers, stores artifacts in S3, and exposes a public frontend served by a lightweight Go API.
 
-## Overview
+The current deployed system has been manually verified end-to-end for all supported operations in both single-operation and multi-operation jobs.
 
-Users upload an image from the frontend, choose one or more operations, and receive downloadable outputs when background processing completes.
+## What It Does
 
-Supported operations:
-- `jpg`, `png`, `webp`, `avif` format conversion
-- `denoise` (DnCNN)
-- `metadata` (EXIF extraction)
+PixTools supports these operations:
 
-Core behavior:
-- async processing via RabbitMQ + Celery
-- idempotent request handling (`Idempotency-Key` header)
-- webhook callback with circuit-breaker protection
-- ZIP bundle generation for processed outputs
-- 24-hour retention model for S3 objects and job history
+- `jpg`
+- `png`
+- `webp`
+- `avif`
+- `denoise`
+- `metadata`
 
-## Architecture
+Core behaviors:
+
+- asynchronous job execution via RabbitMQ + Celery
+- Redis-backed idempotency keys
+- PostgreSQL job tracking on AWS RDS
+- raw, processed, and archive artifact storage in S3
+- per-job presigned download URLs
+- EXIF metadata extraction
+- ZIP bundle generation after processing completes
+- webhook delivery with circuit-breaker protection
+- observability shipped to Grafana Cloud through Alloy
+
+## Current Architecture
+
+PixTools is intentionally split by responsibility:
+
+- `go-api/` owns the public HTTP surface
+- `app/` owns the asynchronous worker runtime
+- Terraform owns infrastructure state
+- Alembic owns database schema state
 
 ```mermaid
 flowchart TD
-  subgraph AWS["AWS Cloud"]
-    ALB[ALB Ingress]
-    RDS[(PostgreSQL 16\nRDS)]
-    S3[(S3 Buckets)]
-    
-    subgraph K3s["K3s Cluster"]
-      subgraph InfraNode["Infra Node (On-Demand t3.small)"]
-        ControlPlane[K3s Control Plane]
-        RMQ(RabbitMQ)
-        REDIS(Redis)
-        BEAT(Celery Beat)
-        ALBCtrl(ALB Controller)
-        CEXP(Celery Exporter)
-      end
-      
-      subgraph WorkloadNode["Workload Nodes (Spot m7i-flex.large, max 3)"]
-        API(Go API)
-        W_STD(Celery Worker Standard)
-        W_ML(Celery Worker ML)
-        NTH(AWS Node Termination Handler)
-      end
+  User[Browser] --> ALB[AWS Application Load Balancer]
+  ALB --> GoAPI[Go API on K3s]
 
-      ALLOY(Alloy DaemonSet)
-    end
-  end
+  GoAPI --> Redis[(Redis)]
+  GoAPI --> Postgres[(AWS RDS PostgreSQL)]
+  GoAPI --> S3[(AWS S3)]
+  GoAPI --> RabbitMQ[(RabbitMQ)]
 
-  GrafanaCloud["☁️ Grafana Cloud (Logs, Metrics, Traces)"]
+  RabbitMQ --> RouterTask[Celery router task]
+  RouterTask --> StdWorker[Celery standard worker]
+  RouterTask --> MLWorker[Celery ML worker]
 
-  User[Frontend User] --> ALB
-  ALB --> API
-  API -.->|Idempotency/Locking| REDIS
-  API -.->|Job Tracking| RDS
-  API -->|Publishes Tasks| RMQ
-  API -->|Uploads Image| S3
-  
-  RMQ -->|Consumes| W_STD
-  RMQ -->|Consumes| W_ML
-  
-  W_STD -->|Processes| S3
-  W_ML -->|Infers| S3
-  
-  W_STD -.->|Updates Status| RDS
-  W_ML -.->|Updates Status| RDS
-  
-  BEAT -->|Schedules| RMQ
-  CEXP -.->|Reads Events| RMQ
-  ALLOY -->|Scrapes| API
-  ALLOY -->|Scrapes| CEXP
-  ALLOY ==>|Ships Telemetry| GrafanaCloud
-  NTH -.->|Cordons & Drains| ControlPlane
+  StdWorker --> S3
+  MLWorker --> S3
+  StdWorker --> Postgres
+  MLWorker --> Postgres
+
+  StdWorker --> Finalize[finalize_job]
+  Finalize --> Archive[bundle_results]
+  Finalize --> Webhook[Optional webhook callback]
+  Archive --> S3
+
+  GoAPI -. poll .-> Postgres
+  GoAPI -. fresh presigned URLs .-> S3
+
+  Alloy[Grafana Alloy] --> GrafanaCloud[Grafana Cloud]
+  GoAPI --> Alloy
+  StdWorker --> Alloy
+  RabbitMQ --> Alloy
 ```
 
 ## Runtime Topology
 
-| Component | Implementation | Rationale |
-| :--- | :--- | :--- |
-| **Ingress & API** | AWS ALB Controller -> K3s Pods -> Go (Gin) | Horizontally scalable edge routing with a 14MB compiled binary. |
-| **Message Broker** | RabbitMQ (StatefulSet) | Durable, persistent queueing with Dead Letter Exchanges for failed tasks. |
-| **State & Locking** | Redis & PostgreSQL 16 (AWS RDS) | Separated transient lock/idempotency state (Redis) from persistent job tracking (RDS). |
-| **Control Plane** | **K3s Server on On-Demand EC2** | Ensures cluster stability. Stateful tracking, locking, and control-plane metrics are isolated from the chaos of Spot terminations. |
-| **Data Plane** | **K3s Agents on Spot Fleet** | Scalable `m7i-flex.large` spot instances handle the heavy Celery and API lifting at ~70% discount. |
-| **Spot Resilience** | AWS Node Termination Handler (NTH) | DaemonSet listens for IMDS 2-minute warnings and gracefully cordons, taints, and drains nodes before termination. |
-| **Observability** | Alloy → Grafana Cloud (LGTM) | Metrics (Prometheus), logs (Loki), and traces (Tempo) shipped via a single Alloy DaemonSet. Celery Exporter bridges worker metrics. |
-| **Infrastructure** | Terraform + AWS SSM | 100% declarative IaC. Secrets are never hardcoded; injected securely via Systems Manager Parameter Store. |
-| **CI/CD** | GitHub Actions (OIDC) | Zero-trust deployment pipeline utilizing short-lived STS tokens for AWS authentication. |
+| Layer | Implementation | Notes |
+| --- | --- | --- |
+| Public HTTP edge | Go + Gin | Serves frontend, validates requests, uploads raw files, writes job rows, publishes Celery-compatible AMQP messages |
+| Async workers | Python 3.12 + Celery | Executes image ops, ML denoise, metadata extraction, finalization, archive bundling, and retention tasks |
+| Message broker | RabbitMQ | Durable queueing with dead-letter routing |
+| Durable state | PostgreSQL 16 on RDS | Source of truth for job records |
+| Idempotency | Redis | Stores `Idempotency-Key -> job_id` mappings |
+| Object storage | S3 | Stores raw inputs, processed outputs, and ZIP bundles |
+| Orchestration | K3s | Self-hosted Kubernetes control plane on EC2 |
+| Ingress | AWS Load Balancer Controller | Uses AWS ALB and AWS-provided DNS name |
+| Telemetry | Alloy -> Grafana Cloud | Logs, metrics, and traces shipped off-cluster |
+| Infrastructure | Terraform | VPC, EC2, IAM, RDS, S3, SSM, ECR, security groups |
+| Delivery | GitHub Actions + OIDC | CI and CD workflows authenticate to AWS with short-lived credentials |
 
-**AWS EC2 Instances** — On-demand `t3.small` infra node + Spot `m7i-flex.large` workload node, both healthy with 3/3 checks passed.
-<p align="center">
-  <img src="images/aws instances.png" alt="AWS EC2 Instances" width="100%"/>
-</p>
+## AWS Deployment Shape
 
-**K3s Cluster Nodes** — Both nodes `Ready`, running K3s `v1.34.4+k3s1` on Amazon Linux 2023.
-<p align="center">
-  <img src="images/kubectl nodes.png" alt="kubectl get nodes" width="100%"/>
-</p>
+The active cloud design is a two-tier K3s deployment in `us-east-1`:
 
-## The Scale-Up Struggle & Engineering Highlights
+- one stable on-demand `t3.small` infra node for control-plane and stateful cluster services
+- one or more spot `m7i-flex.large` workload nodes for the API and Celery workers
+- AWS RDS PostgreSQL in Single-AZ mode
+- secrets and runtime config sourced from AWS Systems Manager Parameter Store
+- public demo ingress exposed through the AWS ALB DNS name, not a custom domain
 
-### The "Ghost Node" Blackout
-The original architecture relied on a single unified K3s Auto Scaling Group backed by Spot Instances. When AWS inevitably reclaimed the spot instance during heavy ML load, it took down the control plane, RabbitMQ, and the API simultaneously. Deployments would hang forever trying to resolve "Ghost Nodes" that AWS had killed but Kubernetes still thought were `NotReady`. 
-**The Fix:** A massive dual-node re-architecture. The control plane, RabbitMQ, and Redis were moved to a stable, on-demand `infra` node. The heavy-lifting API and Celery workers were moved to a scalable array of Spot `workload` nodes. If AWS kills a spot instance now, Celery gracefully requeues the task, the control plane stays alive, and the user never notices.
+This split exists for a reason: control-plane and broker stability do not belong on the same failure domain as bursty image-processing workloads.
 
-### Dynamic Infrastructure as Code
-Early iterations of the CI/CD pipeline relied on hardcoded GitHub Secrets for things like the AWS Load Balancer Security Group ID. When Terraform naturally destroyed and recreated these resources during the dual-node architecture shift, the pipeline broke natively trying to attach ALBs to ghost security groups.
-**The Fix:** Fully dynamic state resolution. Terraform now provisions and writes the exact `alb_security_group_id` directly to AWS Systems Manager (SSM) Parameter Store. The GitHub Actions CD pipeline queries SSM at runtime, completely eliminating out-of-sync credential drift.
+## Supported Job Flow
 
-### The Kubelet Proxy 502 Mystery
-After the dual-node split, `kubectl logs` and Grafana Alloy's log tailing started returning `502 Bad Gateway` for every pod on the workload nodes. The K3s API server was proxying to the agent's kubelet on port `10250`, but the underlying TCP connection was being silently dropped by AWS.
-**Root Cause:** On AWS EC2, nodes in different subnets can route to each other via their *public* IPs — even within the same VPC. When traffic hairpins through the public internet, it no longer matches VPC CIDR-based security group rules. The packets arrive from a public IP that the security group doesn't recognize.
-**The Fix:** Switched the K3s node security group from a CIDR-based ingress rule to a **self-referencing** security group rule (`self = true`). This tells AWS "any resource attached to *this* security group can talk to any other resource attached to *this* security group" — regardless of which IP address the traffic arrives from.
+A normal request moves through the system like this:
 
-### The Celery Metrics Flatline
-Grafana dashboards showed `pixtools_job_end_to_end_seconds_sum` stuck permanently at `0`, even while jobs were visibly completing. The API pod's `/metrics` endpoint was being scraped perfectly by Alloy, so why was everything zero?
-**Root Cause:** The FastAPI app and Celery workers share the same codebase. When the API boots, it imports the task files and *registers* the Prometheus metric in its own memory. Alloy scrapes it, sees it exists, and reports it — but the API only *queues* jobs, it doesn't *execute* them. The actual work happens inside the Celery worker processes, which have no embedded HTTP server and no `/metrics` endpoint.
-**The Fix:** Deployed a dedicated [`celery-exporter`](https://github.com/danihodovic/celery-exporter) container that connects directly to the RabbitMQ broker and translates queue depths, task completions, and execution times into Prometheus metrics. Added a matching Alloy scrape job, and injected `CELERY_WORKER_SEND_TASK_EVENTS=True` into the worker ConfigMap so workers actually emit the events the exporter listens for.
+1. The browser loads `/`, `/static/*`, and `/app-config.js` from the Go API.
+2. The frontend validates file type, file size, and same-format conversions before submit.
+3. The browser sends `POST /api/process` with multipart form data.
+4. The Go API validates the payload, checks Redis idempotency, uploads the raw file to S3, and inserts a `jobs` row into Postgres.
+5. The Go API publishes one or more Celery-compatible AMQP messages to RabbitMQ `default_queue`.
+6. A Python Celery worker consumes `app.tasks.router.start_pipeline` and expands the requested operations into a Celery chord.
+7. Standard image operations run on the standard worker. Denoise runs on the ML worker when queue isolation is enabled.
+8. Metadata extraction writes EXIF data back to the job row.
+9. `finalize_job` writes terminal result keys and presigned URLs to Postgres.
+10. `bundle_results` creates `archives/{job_id}/bundle.zip` asynchronously.
+11. The frontend polls `GET /api/jobs/{job_id}` until results and the archive are available.
 
-### The 2-Minute Warning (Spot Resilience)
-The original spot instance handler was a hand-rolled bash script running as a `systemd` service inside the EC2 user data. It polled the IMDS metadata endpoint every 5 seconds, and when it detected a termination notice, it attempted to download `kubectl` from the internet and run a best-effort `kubectl drain`. On a dying node with degraded networking, this frequently failed silently.
-**The Fix:** Replaced the entire custom handler with the official [AWS Node Termination Handler (NTH)](https://github.com/aws/aws-node-termination-handler) deployed as a Kubernetes DaemonSet. NTH runs *inside* the cluster with proper RBAC, listens to IMDS natively via `hostNetwork: true`, and on a spot interruption notice: cordons the node, taints it to prevent new scheduling, gracefully evicts all pods, and lets Kubernetes reschedule them — all within the 2-minute warning window.
+For the exhaustive workflow, including S3 key patterns, queue semantics, status transitions, and failure branches, see `system_workflow.md`.
 
-### The Ghost Label Problem
-New spot agent nodes would join the K3s cluster successfully, but pods requiring `nodeSelector: pixtools-workload-app=true` would stay stuck in `Pending` indefinitely. The `reconcile-cluster.sh` script *did* label nodes by querying EC2 tags, but it only ran during initial deployment — not when a fresh spot instance replaced a terminated one mid-day.
-**The Fix:** Baked the label directly into the K3s agent install command using `--node-label=pixtools-workload-app=true` in the EC2 user data template. Now every agent node is instantly schedulable the moment it joins the cluster, with zero reliance on external labeling scripts.
-
-### The Go Rewrite (Killing Python's 400MB Image)
-The FastAPI API container ran Python 3.12 with ~400MB of dependencies. Every cold start pulled hundreds of megabytes, and the runtime memory sat at ~200MB per pod. For an API that just validates a form, uploads to S3, and publishes a RabbitMQ message, that's absurd.
-**The Rewrite:** Replaced the entire FastAPI service with a compiled Go binary using Gin, GORM, and `gocelery`. The new multi-stage Dockerfile produces a **14MB scratch image** — a 96% reduction. Memory usage dropped to ~20MB per pod, and CPU requests went from 200m to 20m.
-**The Celery Trap:** Go can't natively construct Celery's complex `chord`/`chain` Canvas primitives. Instead of fighting `gocelery`'s serialization, the Go API fires a single `tasks.router.start_pipeline` task. A Python worker receives it and constructs the full DAG internally — bridging Go speed with Python's Celery fluency.
-**The `asyncpg` Dialect Crash:** The Go binary booted cleanly locally but entered `CrashLoopBackOff` in production. The SSM-injected `DATABASE_URL` used Python's `postgresql+asyncpg://` scheme, which Go's `pgx` driver rejected as an invalid keyword. A one-line `strings.Replace` to strip `+asyncpg` fixed it.
-**The NTH Scheduling Lock:** Even after uncordoning the only live agent node, pods stayed `Pending`. The AWS Node Termination Handler had silently applied a `NoSchedule` taint (`aws-node-termination-handler/rebalance-recommendation`) after receiving a spot rebalance event — and `kubectl uncordon` doesn't remove custom taints. Manually removing the NTH taint unblocked scheduling instantly.
-
-### Additional Highlights:
-* **Asynchronous Orchestration:** Decoupled the FastAPI ingress from heavy compute tasks using RabbitMQ and Celery. Dedicated worker queues (`default_queue` vs. `ml_inference_queue`) prevent long-running ML jobs from starving standard conversion tasks.
-* **Idempotency & Fault Tolerance:** Implemented `Idempotency-Key` headers backed by Redis to guarantee safe retries across distributed network drops. 
-* **Resilient Webhook Callbacks:** Integrated `pybreaker` circuit breakers to protect the worker nodes from cascading failures when client webhook endpoints are unreachable or slow.
-* **Cloud-Native Observability:** Instrumented with OpenTelemetry, shipping logs, metrics, and traces to a Grafana Cloud LGTM stack via a lightweight Alloy DaemonSet.
-
-## API Contract
+## Public API Surface
 
 Base path: `/api`
 
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/livez` | `GET` | simple liveness probe |
+| `/api/readyz` | `GET` | readiness probe for DB, Redis, and RabbitMQ |
+| `/api/health` | `GET` | deep health check for DB, Redis, RabbitMQ, and S3 |
+| `/api/process` | `POST` | submit a processing job |
+| `/api/jobs/:id` | `GET` | poll job status, result URLs, metadata, and archive URL |
+
 ### `POST /api/process`
 
-`multipart/form-data` request:
-- `file` (required)
-- `operations` (required, JSON string array, example `["webp","metadata"]`)
-- `operation_params` (optional JSON string object keyed by operation)
-  - Options supported: 
-    - `quality` (1-100) for `jpg` and `webp`
-    - `resize` (`width` and/or `height` in px) for conversion operations
-- `webhook_url` (optional)
+Consumes `multipart/form-data` with these fields:
 
-Header:
-- `Idempotency-Key` (optional but recommended)
+- `file` required
+- `operations` required JSON string array
+- `operation_params` optional JSON string object
+- `webhook_url` optional absolute `http://` or `https://` URL
+
+Important headers:
+
+- `Idempotency-Key` optional but recommended
+- `X-API-Key` required when `API_KEY` is configured
+- `X-Request-ID` optional; generated if omitted
+
+Validation rules enforced by the current backend:
+
+- max upload size defaults to `10 MB`
+- accepted MIME types:
+  - `image/jpeg`
+  - `image/png`
+  - `image/webp`
+  - `image/avif`
+- unknown operations are rejected
+- empty operation lists are rejected
+- same-format conversions are rejected
+- `quality` is only accepted for `jpg` and `webp`
+- `resize` is only accepted for `jpg`, `png`, `webp`, `avif`, and `denoise`
+- webhook URLs must be absolute `http(s)` URLs
 
 Example:
 
 ```bash
 curl -X POST "http://localhost:8000/api/process" \
   -H "Idempotency-Key: demo-001" \
+  -H "X-API-Key: <api-key>" \
   -F "file=@test_image.png;type=image/png" \
   -F "operations=[\"webp\",\"denoise\",\"metadata\"]" \
-  -F "operation_params={\"webp\":{\"quality\":80},\"denoise\":{\"resize\":{\"width\":1280}}}" \
-  -F "webhook_url=https://webhook.site/<id>"
+  -F "operation_params={\"webp\":{\"quality\":80},\"denoise\":{\"resize\":{\"width\":1280}}}"
 ```
 
-### `GET /api/jobs/{job_id}`
+### `GET /api/jobs/:id`
 
-Returns current state and outputs:
+Returns:
+
+- `job_id`
 - `status`
 - `operations`
 - `result_urls`
@@ -192,24 +193,193 @@ Returns current state and outputs:
 - `error_message`
 - `created_at`
 
-### `GET /api/health`
+Current runtime statuses:
 
-Dependency health probe used for readiness/liveness.
+- `PENDING`
+- `PROCESSING`
+- `COMPLETED`
+- `FAILED`
+- `COMPLETED_WEBHOOK_FAILED`
+
+## Current Worker and Queue Design
+
+PixTools uses queue isolation to prevent heavy ML work from starving lightweight image conversions.
+
+Queues:
+
+- `default_queue`
+- `ml_inference_queue`
+- `dead_letter`
+
+Task routing:
+
+- `app.tasks.router.*` -> `default_queue`
+- `app.tasks.image_ops.*` -> `default_queue`
+- `app.tasks.metadata.*` -> `default_queue`
+- `app.tasks.finalize.*` -> `default_queue`
+- `app.tasks.archive.*` -> `default_queue`
+- `app.tasks.maintenance.*` -> `default_queue`
+- `app.tasks.ml_ops.denoise` -> `ml_inference_queue`
+
+Current workload sizing in Kubernetes:
+
+| Workload | Command / mode | Requests | Limits |
+| --- | --- | --- | --- |
+| API | Go HTTP server | `20m` CPU / `32Mi` memory | `200m` CPU / `128Mi` memory |
+| Standard worker | Celery `default_queue`, `--concurrency=2` | `250m` CPU / `512Mi` memory | `900m` CPU / `1280Mi` memory |
+| ML worker | Celery `ml_inference_queue`, solo pool | `500m` CPU / `1024Mi` memory | `1500m` CPU / `2048Mi` memory |
+| Beat | Celery Beat | `100m` CPU / `192Mi` memory | `300m` CPU / `384Mi` memory |
+| RabbitMQ | StatefulSet | `150m` CPU / `256Mi` memory | `500m` CPU / `512Mi` memory |
+| Redis | Deployment | `50m` CPU / `128Mi` memory | `200m` CPU / `256Mi` memory |
+| Alloy | Deployment | `100m` CPU / `128Mi` memory | `300m` CPU / `384Mi` memory |
+
+The standard worker was explicitly down-tuned to `--concurrency=2` after live OOM diagnosis on image fan-out workloads. That is not arbitrary tuning; it is the current stable operating point for the demo footprint.
+
+## Storage Layout
+
+Redis key pattern:
+
+- `idempotency:{Idempotency-Key}` -> `<job_id>`
+
+S3 key patterns:
+
+- raw uploads: `raw/{job_id}/{original_filename}`
+- processed outputs: `processed/{job_id}/{operation}_{random8}.{ext}`
+- ZIP archives: `archives/{job_id}/bundle.zip`
+
+## Observability
+
+PixTools ships telemetry to Grafana Cloud through a lightweight in-cluster Alloy deployment.
+
+Current observability stack:
+
+- Alloy for collection and remote write/export
+- Grafana Cloud Prometheus for metrics
+- Grafana Cloud Loki for logs
+- Grafana Cloud Tempo for traces
+- Celery Exporter for worker and queue metrics
+- OpenTelemetry in the Go API and Python worker runtime
+
+What is currently instrumented:
+
+- Go HTTP request traces
+- Celery task traces
+- queue wait timing
+- worker processing duration
+- end-to-end job timing
+- task failure and retry counters
+- webhook circuit-breaker transitions
+- RabbitMQ queue depth gauges
+
+Important current limitation:
+
+- the live Go API does not yet expose `/metrics` parity with the legacy Python API surface
+
+<p align="center">
+  <img src="images/grafana api.png" alt="Grafana metrics" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="images/grafana tracing.png" alt="Grafana tracing" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="images/Grafana Loki Logs.png" alt="Grafana logs" width="100%"/>
+</p>
+
+## CI/CD and Deployment Flow
+
+PixTools uses GitHub Actions for both CI and CD.
+
+Workflows:
+
+- `.github/workflows/ci.yaml`
+- `.github/workflows/cd-dev.yaml`
+- `.github/workflows/cd-prod.yaml`
+
+### CI
+
+The CI workflow verifies:
+
+- `ruff`
+- `mypy`
+- `pytest`
+- Docker builds
+- Trivy image and filesystem scans
+- `pip-audit`
+- `bandit`
+
+### CD
+
+The deployment flow is intentionally simple and reproducible:
+
+1. build API and worker images
+2. push immutable image digests to ECR
+3. render Kubernetes manifests from `k8s/`
+4. upload rendered artifacts to the manifests S3 bucket
+5. resolve the live K3s instance through AWS APIs
+6. run `scripts/deploy/reconcile-cluster.sh` over SSM
+7. refresh runtime secrets from SSM
+8. apply manifests in deterministic order
+9. wait for rollout completion
+10. run a smoke test against the deployed API
+
+Deployment helper scripts:
+
+- `scripts/deploy/render-manifests.sh`
+- `scripts/deploy/resolve-k3s-instance.sh`
+- `scripts/deploy/run-on-ssm.sh`
+- `scripts/deploy/reconcile-cluster.sh`
+
+This is not kubectl-clickops. The cluster is reconciled through versioned artifacts and remote automation.
+
+## Infrastructure and Secret Management
+
+Terraform code lives under `infra/` and currently manages:
+
+- networking
+- EC2 compute
+- ECR repositories
+- IAM roles and GitHub OIDC trust
+- RDS PostgreSQL
+- S3 buckets
+- SSM parameters
+- security groups
+- observability-related AWS plumbing
+
+Secrets are not committed to the repository.
+
+Runtime secrets are sourced from AWS Systems Manager Parameter Store and materialized into Kubernetes secrets/config during reconciliation.
+
+Important files:
+
+- `infra/dev.tfvars`
+- `infra/networking.tf`
+- `infra/compute.tf`
+- `infra/rds.tf`
+- `infra/ecr.tf`
+- `infra/iam.tf`
+- `infra/iam_github.tf`
+- `infra/ssm.tf`
+- `infra/security_groups.tf`
+- `infra/observability.tf`
 
 ## Local Development
 
 ### Prerequisites
 
-- Docker + Docker Compose
+- Docker
+- Docker Compose
 
-### Start stack
+### Start the stack
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-Services started locally:
+Local services:
+
 - `api`
 - `worker-standard`
 - `worker-ml`
@@ -218,285 +388,137 @@ Services started locally:
 - `redis`
 - `rabbitmq`
 - `localstack`
-- `migrate` (one-shot Alembic upgrade)
+- `migrate`
 
-### Local endpoints
+Useful local endpoints:
 
-- App: `http://localhost:8000`
-- Docs: `http://localhost:8000/docs`
+- app: `http://localhost:8000`
 - RabbitMQ UI: `http://localhost:15672`
 
-### Common commands
+Useful commands:
 
 ```bash
 docker compose ps
 docker compose logs -f api
 docker compose logs -f worker-standard
-docker compose run --rm migrate
+docker compose logs -f worker-ml
+docker compose logs -f beat
 ```
 
-## Infrastructure & Operations (GitOps)
+## Benchmarking
 
-Deployments are automated through a single reconcile flow executed over AWS Systems Manager (SSM), so cluster fixes are versioned instead of manual patches.
-Infrastructure code lives in `infra/`.  
-Rendered manifests are generated from `k8s/` by `scripts/deploy/render-manifests.sh`.
+Load-testing and measurement scaffolding lives under `bench/`.
 
-### Canonical deploy flow
+Included scenarios:
 
-1. CI/CD builds API and worker images and pushes immutable digests to ECR.
-2. `scripts/deploy/render-manifests.sh` renders `k8s/` templates and packages `scripts/deploy/reconcile-cluster.sh`.
-3. CD uploads artifacts to `s3://<manifest-bucket>/<manifest-prefix>`.
-4. CD runs one remote command via `scripts/deploy/run-on-ssm.sh` that executes `reconcile-cluster.sh` on the K3s node.
-5. `reconcile-cluster.sh` performs the full convergence pass:
-   - sync manifests from S3
-   - refresh ECR pull secret
-   - materialize runtime secrets/config from SSM
-   - clean stale Kubernetes nodes and relabel node roles (`pixtools-workload-app`, `pixtools-workload-infra`)
-   - apply manifests in deterministic order
-   - auto-recover RabbitMQ PVC node-affinity mismatch when detected
-   - wait for rollout completion of core workloads
+- `bench/k6/baseline.js`
+- `bench/k6/spike.js`
+- `bench/k6/retry_storm.js`
+- `bench/k6/starvation_mix.js`
 
-### Terraform baseline
+Helper scripts:
+
+- `bench/run-k6.ps1`
+- `bench/collect-grafana-metrics.ps1`
+- `bench/templates/benchmark-report-template.md`
+
+This exists so performance claims can be tied to repeatable scripts and captured metrics, not vague anecdotes.
+
+## Reference Docs
+
+These files are the detailed source-of-truth documents for the current system:
+
+- `system_workflow.md` - exact runtime workflow, queue handoff, S3 keys, status semantics, and failure branches
+- `go_api_parity_patchlist.md` - migration parity checklist from the Python API to the Go API
+- `predeploy_blockers.md` - deploy review notes and intentional design debt
+- `bench/README.md` - benchmark execution notes
+- `infra/README.md` - Terraform-specific notes
+
+## Repository Layout
+
+```text
+app/
+  services/        Shared Python services: S3, webhook, DAG builder, idempotency
+  tasks/           Celery tasks, routing, finalization, archive, maintenance
+  ml/              DnCNN model definition
+  observability.py Worker/API observability wiring
+  middleware.py    Legacy FastAPI middleware still used by Python runtime pieces
+  metrics.py       Prometheus metric definitions used by workers
+  main.py          Legacy FastAPI entrypoint retained as reference
+
+go-api/
+  cmd/api/         Go entrypoint
+  internal/config/ Runtime config loading
+  internal/handlers/ HTTP handlers and middleware
+  internal/models/ Validation and GORM models
+  internal/services/ S3, Redis idempotency, AMQP Celery publisher
+  internal/telemetry/ OpenTelemetry setup
+  static/          Public frontend assets served by the Go API
+
+alembic/           Database schema migrations
+bench/             k6 scenarios and benchmark collection helpers
+infra/             Terraform IaC
+k8s/               Kubernetes manifests
+scripts/deploy/    Deployment and reconciliation helpers
+scripts/teardown/  Full AWS teardown tooling
+tests/             Python tests
+images/            README screenshots
+```
+
+## Troubleshooting
+
+### Job stuck in `PENDING` or `PROCESSING`
+
+Check:
 
 ```bash
-cd infra
-terraform init -backend-config=backend.hcl
-terraform plan -var-file=dev.tfvars
-terraform apply -var-file=dev.tfvars
+kubectl -n pixtools get pods
+kubectl -n pixtools logs deploy/pixtools-worker-standard --tail=200
+kubectl -n pixtools logs deploy/pixtools-worker-ml --tail=200
 ```
 
-Important outputs:
-- `manifests_bucket_name`
-- `alb_security_group_id`
-- `ecr_api_repository_url`
-- `ecr_worker_repository_url`
-- `grafana_cloud_stack_id_parameter`
-- `grafana_cloud_logs_user_parameter`
-- `grafana_cloud_metrics_user_parameter`
-- `grafana_cloud_traces_user_parameter`
-- `grafana_cloud_api_key_parameter`
-- `grafana_cloud_logs_url_parameter`
-- `grafana_cloud_metrics_url_parameter`
-- `grafana_cloud_traces_url_parameter`
+### Health check failing
 
-### Monitoring access
-
-Grafana UI is hosted in Grafana Cloud (not on the K3s node).  
-The cluster runs only a lightweight Alloy collector.
-
-Grafana Cloud ingest settings are stored in SSM Parameter Store:
+Check:
 
 ```bash
-aws ssm get-parameter \
-  --name "/pixtools/dev/grafana_cloud_stack_id" \
-  --query "Parameter.Value" \
-  --output text
-
-aws ssm get-parameter \
-  --name "/pixtools/dev/grafana_cloud_api_key" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text
+curl http://<host>/api/health
 ```
 
-Optional per-signal username overrides:
-- `/pixtools/dev/grafana_cloud_logs_user`
-- `/pixtools/dev/grafana_cloud_metrics_user`
-- `/pixtools/dev/grafana_cloud_traces_user`
+### Deployment rollout failing
 
-If unset, deploy logic falls back to `/pixtools/dev/grafana_cloud_stack_id`.
+Inspect:
 
-### Observability in Action
-
-The full LGTM stack (Logs, Grafana, Traces, Metrics) is shipped from the cluster via a lightweight Alloy DaemonSet to Grafana Cloud.
-
-**API & Worker Metrics** — Real-time throughput, p99 latency, RabbitMQ task backlog, and end-to-end job processing times.
-<p align="center">
-  <img src="images/grafana api.png" alt="Grafana API & Worker Metrics Dashboard" width="100%"/>
-</p>
-
-**Distributed Tracing** — OpenTelemetry traces from the FastAPI app and Celery workers, visualized in Grafana Tempo with span rate breakdowns and duration histograms.
-<p align="center">
-  <img src="images/grafana tracing.png" alt="Grafana Tempo Distributed Tracing" width="100%"/>
-</p>
-
-**Full Job Trace Waterfall** — A single `POST /api/process` request traced end-to-end (9.52s): API ingress → task fan-out (`convert_webp`, `convert_avif`) → `finalize_job` → `bundle_results` → response. 33 spans across the full lifecycle.
-<p align="center">
-  <img src="images/full trace.png" alt="Full Job Trace Waterfall" width="100%"/>
-</p>
-
-**Centralized Logs** — All pod logs aggregated via Loki with structured fields for correlation — filter by job ID, task name, or processing duration.
-<p align="center">
-  <img src="images/Grafana Loki Logs.png" alt="Grafana Loki Centralized Logs" width="100%"/>
-</p>
-
-**System & Database Health** — Postgres Exporter status, Python GC activity for leak detection, OTel span throughput, network TX/RX, and per-component memory usage.
-<p align="center">
-  <img src="images/sys and db.png" alt="System and Database Health Dashboard" width="100%"/>
-</p>
-
-### GitHub Actions pipelines
-
-**Full CD Pipeline** — End-to-end green deployment: OIDC auth → ECR push → manifest render → S3 sync → SSM deploy → smoke test.
-<p align="center">
-  <img src="images/CD Green.png" alt="GitHub Actions CD Pipeline" width="100%"/>
-</p>
-
-- `CI` (`.github/workflows/ci.yaml`)
-  - `ruff`
-  - `mypy`
-  - `pytest`
-  - Docker image build + Trivy scan
-  - `pip-audit` + `bandit` + Trivy FS scan
-
-- `CD-Dev` (`.github/workflows/cd-dev.yaml`)
-  - trigger: push to `main`
-  - build + push API/worker images to ECR
-  - render manifests with image digests + ingress values
-  - sync manifests to S3
-  - execute `scripts/deploy/reconcile-cluster.sh` on K3s node via SSM
-  - run post-deploy smoke test (`/api/health`, then `POST /api/process`, then poll to completion)
-
-- `CD-Prod` (`.github/workflows/cd-prod.yaml`)
-  - manual trigger (`workflow_dispatch`)
-  - same reconcile flow as `CD-Dev` against `prod` secrets/prefix
-
-### Required GitHub secrets
-
-Set in the `dev` environment:
-- `AWS_DEPLOY_ROLE_ARN`
-- `MANIFEST_BUCKET`
-- `ALLOWED_INGRESS_CIDRS`
-
-*(Note: `ALB_SECURITY_GROUP_ID` is no longer a secret; it is fetched dynamically from SSM at runtime to prevent Terraform drift!)*
-
-For public demo access:
-- `ALLOWED_INGRESS_CIDRS=0.0.0.0/0`
-
-For `prod`, use the same secret names in the `prod` environment.
-
-### OIDC trust setup (required once)
-
-Create an IAM role trusted by GitHub OIDC and use its ARN as `AWS_DEPLOY_ROLE_ARN`.
-At minimum, the role trust policy must allow:
-- provider: `token.actions.githubusercontent.com`
-- audience: `sts.amazonaws.com`
-- subject scoped to your repo/branch or environment (recommended)
-
-### Deployment rollback
-
-Two practical rollback paths:
-1. Re-run a previous successful CD workflow run (previous commit state).
-2. Redeploy previous image digest by updating rendered manifest image references and re-applying.
-
-### Full teardown (destroy demo environment)
-
-Use the PowerShell teardown script for a complete cleanup pass:
-- scales K3s ASG to zero
-- removes in-cluster workloads via SSM
-- deletes AWS Load Balancer Controller artifacts (ALB/target groups/security groups)
-- purges ECR images and versioned S3 buckets
-- runs `terraform destroy` (with retry cleanup)
-- removes SSM runtime parameters
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\teardown\teardown-aws.ps1 -Environment dev
+```bash
+kubectl -n pixtools get pods -o wide
+kubectl -n pixtools describe pod <pod-name>
 ```
 
-Non-interactive destroy:
+### Full environment teardown
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\teardown\teardown-aws.ps1 -Environment dev -AutoApprove
 ```
 
-Optional flags:
-- By default teardown resets the external K3s datastore DB (`k3s_state`) via SSM before destroying infra to avoid stale control-plane state on next deploy.
-- `-SkipK3sDatastoreReset` to disable that DB reset.
-- `-DestroyBackend` to also remove Terraform backend S3 state bucket and lock table.
+## Known Limitations
 
-## Security Notes
+- The Go API does not yet expose `/metrics` parity with the legacy FastAPI API.
+- The public demo uses the AWS ALB DNS name instead of a custom domain.
+- Security is intentionally demo-grade at the frontend edge because the UI is public and the API key is shipped through `/app-config.js`.
+- There is no transactional outbox yet; enqueue failures are compensated by marking the job failed.
 
-- Runtime secrets are sourced from SSM and injected into Kubernetes secrets/config at bootstrap.
-- ALB ingress CIDR is configurable (`ALLOWED_INGRESS_CIDRS`).
-- OpenAPI docs are intentionally public for portfolio/demo exploration.
-- `API_KEY` is provisioned and available in config, but route-level enforcement is intentionally not enabled in current demo flow.
+## Engineering Notes
 
-## Repository Structure
+The interesting work in PixTools was not writing an image conversion endpoint. It was making the whole platform behave coherently under real cloud constraints:
 
-```text
-app/
-  routers/         FastAPI endpoints (health, jobs) — legacy, retained for Celery workers
-  services/        S3, idempotency, webhook, DAG builder
-  tasks/           Celery tasks (image_ops, ml_ops, metadata, archive, finalize, maintenance, router)
-  static/          Frontend (HTML/CSS/JS)
-  ml/              DnCNN model definition
-  observability.py OpenTelemetry + Prometheus metrics wiring
-  middleware.py    Request ID + metrics middleware
-go-api/            Go API (replaces FastAPI for HTTP layer)
-  cmd/api/         Application entrypoint (main.go)
-  internal/
-    config/        Environment variable parsing (strips asyncpg dialect)
-    handlers/      Gin HTTP handlers (Server struct DI)
-    models/        GORM database models & validation structs
-    services/      S3, Celery, idempotency client wrappers
-    telemetry/     OpenTelemetry OTLP exporter setup
-alembic/           Schema migrations (legacy, superseded by GORM AutoMigrate)
-infra/             Terraform IaC (VPC, EC2, RDS, IAM, SSM, Security Groups)
-  templates/       EC2 user data scripts for K3s server + agent bootstrap
-k8s/               Kubernetes manifests
-  monitoring/      Alloy, Celery Exporter, AWS Node Termination Handler
-  workers/         Celery Standard, ML, and Beat deployments
-  api/             Go API Deployment, Service, HPA
-scripts/deploy/    Manifest rendering, SSM reconciliation, and deploy helpers
-scripts/teardown/  Full environment teardown (PowerShell)
-bench/             k6 benchmark scenarios and measurement playbook
-tests/             Unit and integration tests
-images/            README screenshots (UI, Grafana, AWS, CI/CD)
-```
+- splitting control-plane and workload capacity so spot churn does not take the cluster brain down with it
+- keeping Alembic as the schema authority while migrating only the HTTP edge from Python to Go
+- publishing Celery-compatible AMQP messages directly from Go instead of pretending the Python worker runtime does not matter
+- diagnosing live worker failures from actual Kubernetes and SSM evidence instead of hand-waving them as transient
+- treating deployment and teardown as first-class automation problems, not manual ops checklists
 
-## Troubleshooting
-
-### Frontend stuck on upload
-
-- Check browser console for JS errors.
-- Verify network call to `POST /api/process`.
-- Confirm backend health:
-  ```bash
-  curl http://<host>/api/health
-  ```
-
-### Job stuck in `PENDING`
-
-- Verify RabbitMQ and workers are up.
-- Check worker logs for task failures.
-- Confirm migrations are applied (`alembic upgrade head`).
-
-### Monitoring pods not ready
-
-- Check monitoring workloads:
-  ```bash
-  kubectl -n pixtools get pods | grep alloy
-  ```
-- Check Alloy health:
-  ```bash
-  kubectl -n pixtools port-forward deploy/alloy 12345:12345
-  curl http://localhost:12345/-/ready
-  ```
-
-### Local reset
-
-```bash
-docker compose down -v
-docker compose up -d --build
-docker compose logs -f migrate
-```
-
-## About This Project
-
-PixTools was built from scratch to demonstrate full-lifecycle cloud engineering — not just application code, but the entire platform beneath it. Rather than relying on managed PaaS providers, every layer is hand-architected: the VPC topology, subnet routing, EC2 launch templates, RDS provisioning, K3s cluster bootstrapping, IAM OIDC federation, and CI/CD pipelines — all defined declaratively in Terraform and deployed through zero-trust GitHub Actions workflows.
-
-The engineering war stories in this README are real. Every debugging session, every 502 mystery, every flatlined metric — they all happened in the process of getting this system to production-grade reliability on a budget of two EC2 instances and a lot of persistence.
+That is the point of the project.
 
 ## License
 
-Internal/portfolio project.
+Internal portfolio project.
