@@ -107,7 +107,18 @@ func (s *S3Service) ObjectExists(ctx context.Context, key string) bool {
 	return err == nil
 }
 
+// CheckBucket verifies bucket reachability for health endpoints.
+func (s *S3Service) CheckBucket(ctx context.Context) error {
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(s.bucket),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to head bucket: %w", err)
+	}
+	return nil
+}
+
 // GetArchiveKey returns the standard path for a job's zip bundle
 func (s *S3Service) GetArchiveKey(jobID string) string {
-	return fmt.Sprintf("processed/%s/bundle.zip", jobID)
+	return fmt.Sprintf("archives/%s/bundle.zip", jobID)
 }

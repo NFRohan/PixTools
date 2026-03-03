@@ -146,10 +146,12 @@ def _extract_exif_metadata(s3_raw_key: str) -> dict:
     return metadata
 
 
-def _parse_enqueued_at(headers: dict | None) -> float | None:
-    if not headers:
-        return None
-    raw = headers.get("X-Job-Enqueued-At")
+def _parse_enqueued_at(headers: dict | None, fallback=None) -> float | None:
+    raw = None
+    if headers:
+        raw = headers.get("X-Job-Enqueued-At")
+    if raw is None:
+        raw = fallback
     if raw is None:
         return None
     try:
@@ -159,11 +161,18 @@ def _parse_enqueued_at(headers: dict | None) -> float | None:
 
 
 @celery_app.task(name="app.tasks.metadata.extract_metadata", bind=True, max_retries=2)
-def extract_metadata(self, job_id: str, s3_raw_key: str, mark_completed: bool = False) -> dict:
+def extract_metadata(
+    self,
+    job_id: str,
+    s3_raw_key: str,
+    mark_completed: bool = False,
+    request_id: str = "N/A",
+    enqueued_at: float | str | None = None,
+) -> dict:
     """Extract EXIF metadata and persist it on the job row."""
     try:
         headers = getattr(self.request, "headers", None) or {}
-        enqueued_at = _parse_enqueued_at(headers)
+        enqueued_at = _parse_enqueued_at(headers, enqueued_at)
         metadata = _extract_exif_metadata(s3_raw_key)
         engine = _get_sync_engine()
         webhook_url = ""

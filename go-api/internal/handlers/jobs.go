@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,30 +42,35 @@ func (s *Server) CreateJob(c *gin.Context) {
 		return
 	}
 
-	// 3. Parse Operations JSON
-	var ops []string
-	if err := json.Unmarshal([]byte(req.Operations), &ops); err != nil || len(ops) == 0 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": "Invalid or empty operations array"})
+	ops, err := models.ParseOperations(req.Operations)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": fmt.Sprintf("Invalid operations: %v", err)})
 		return
 	}
 
-	// 4. Parse Operation Params JSON (Optional)
-	var opParams map[string]interface{}
-	if req.OperationParams != "" {
-		if err := json.Unmarshal([]byte(req.OperationParams), &opParams); err != nil {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": fmt.Sprintf("Invalid operation_params JSON: %v", err)})
-			return
-		}
-	} else {
-		opParams = make(map[string]interface{})
+	opParams, err := models.ParseOperationParams(req.OperationParams, ops)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": err.Error()})
+		return
+	}
+
+	validatedWebhookURL, err := models.ValidateWebhookURL(req.WebhookURL)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": err.Error()})
+		return
+	}
+
+	if err := models.ValidateSourceTargetFormats(req.File.Filename, ops); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": err.Error()})
+		return
 	}
 
 	// 5. Check Idempotency Cache
 	if req.IdempotencyKey != "" {
 		existingJobID, err := s.Idempotency.CheckIdempotency(c.Request.Context(), req.IdempotencyKey)
 		if err != nil {
-			// Log error but continue
-			fmt.Printf("Idempotency read error: %v\n", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "idempotency store unavailable"})
+			return
 		} else if existingJobID != "" {
 			c.JSON(http.StatusAccepted, gin.H{"job_id": existingJobID, "status": "PENDING"})
 			return
@@ -89,6 +92,11 @@ func (s *Server) CreateJob(c *gin.Context) {
 	}
 
 	jobID := uuid.New()
+	requestID := c.GetString("request_id")
+	if requestID == "" {
+		requestID = c.GetHeader("X-Request-ID")
+	}
+	enqueuedAt := time.Now().UTC()
 
 	// Blocking network call to AWS
 	s3RawKey, err := s.S3.UploadRaw(c.Request.Context(), fileBytes, req.File.Filename, jobID.String())
@@ -101,10 +109,11 @@ func (s *Server) CreateJob(c *gin.Context) {
 	job := models.Job{
 		ID:               jobID,
 		Status:           models.StatusPending,
-		Operations:       ops,
+		Operations:       toStringArray(ops),
 		S3RawKey:         s3RawKey,
 		OriginalFilename: req.File.Filename,
-		WebhookURL:       req.WebhookURL,
+		WebhookURL:       validatedWebhookURL,
+		RetryCount:       0,
 	}
 
 	if err := s.DB.Create(&job).Error; err != nil {
@@ -112,41 +121,37 @@ func (s *Server) CreateJob(c *gin.Context) {
 		return
 	}
 
-	// 8. Write to Idempotency Cache
-	if req.IdempotencyKey != "" {
-		// Fire and forget cache write
-		go func() {
-			_ = s.Idempotency.SetIdempotency(context.Background(), req.IdempotencyKey, jobID.String())
-		}()
-	}
-
 	// 9. Dispatch to Celery RabbitMQ Pipeline Router
-	requestID := c.GetHeader("X-Request-ID")
-	enqueuedAt := time.Now()
-
 	// Does it need metadata extraction?
 	metadataRequested := false
 	var pipelineOps []string
 	for _, op := range ops {
-		if op == string(models.OpMetadata) {
+		if op == models.OpMetadata {
 			metadataRequested = true
 		} else {
-			pipelineOps = append(pipelineOps, op)
+			pipelineOps = append(pipelineOps, string(op))
 		}
 	}
 
-	if len(pipelineOps) > 0 {
-		err = s.Celery.SubmitDAGRouterTask(jobID.String(), s3RawKey, pipelineOps, opParams, requestID, enqueuedAt)
-		if err != nil {
-			// Job created in DB, but failed to enqueue. Let background sweep recover it or return error
-			fmt.Printf("failed to publish DAG router: %v\n", err)
-		}
+	err = s.Celery.PublishJobTasks(
+		jobID.String(),
+		s3RawKey,
+		pipelineOps,
+		flattenOpParams(opParams),
+		metadataRequested,
+		requestID,
+		enqueuedAt,
+	)
+	if err != nil {
+		_ = s.markJobEnqueueFailed(jobID, err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to enqueue job"})
+		return
 	}
 
-	if metadataRequested {
-		err = s.Celery.SubmitMetadataTask(jobID.String(), s3RawKey, len(pipelineOps) == 0)
-		if err != nil {
-			fmt.Printf("failed to publish metadata task: %v\n", err)
+	// 10. Write to Idempotency Cache after successful commit + publish.
+	if req.IdempotencyKey != "" {
+		if err := s.Idempotency.SetIdempotency(c.Request.Context(), req.IdempotencyKey, jobID.String()); err != nil {
+			fmt.Printf("failed to persist idempotency mapping for job %s: %v\n", jobID.String(), err)
 		}
 	}
 
@@ -229,4 +234,29 @@ func (s *Server) GetJob(c *gin.Context) {
 		"error_message": job.ErrorMessage,
 		"created_at":    createdAtIso,
 	})
+}
+
+func toStringArray(ops []models.OperationType) models.StringArray {
+	values := make(models.StringArray, 0, len(ops))
+	for _, op := range ops {
+		values = append(values, string(op))
+	}
+	return values
+}
+
+func flattenOpParams(params map[string]map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(params))
+	for key, value := range params {
+		out[key] = value
+	}
+	return out
+}
+
+func (s *Server) markJobEnqueueFailed(jobID uuid.UUID, enqueueErr string) error {
+	return s.DB.Model(&models.Job{}).
+		Where("id = ?", jobID).
+		Updates(map[string]interface{}{
+			"status":        models.StatusFailed,
+			"error_message": fmt.Sprintf("enqueue failed: %s", enqueueErr),
+		}).Error
 }

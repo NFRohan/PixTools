@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // JobStatus matches the Python enum
@@ -77,17 +76,17 @@ func (m ResultKeys) Value() (driver.Value, error) {
 // Job represents the database schema for the jobs table
 type Job struct {
 	ID               uuid.UUID   `gorm:"type:uuid;primaryKey"`
-	Status           JobStatus   `gorm:"type:varchar;not null"`
-	Operations       StringArray `gorm:"type:jsonb;not null"` // Using JSONB for the array is safer across dialects
-	S3RawKey         string      `gorm:"type:varchar;not null"`
-	OriginalFilename string      `gorm:"type:varchar"`
-	WebhookURL       string      `gorm:"type:varchar"`
+	Status           JobStatus   `gorm:"type:varchar;not null;index"`
+	Operations       StringArray `gorm:"type:jsonb;not null"`
+	S3RawKey         string      `gorm:"type:varchar(512);not null"`
+	OriginalFilename string      `gorm:"type:varchar(255)"`
+	WebhookURL       string      `gorm:"type:varchar(2048);not null"`
 	ResultKeys       ResultKeys  `gorm:"type:jsonb"`
-	ResultURLs       JSONMap     `gorm:"type:jsonb"` // TTL urls, optional
+	ResultURLs       JSONMap     `gorm:"type:jsonb"`
 	ExifMetadata     JSONMap     `gorm:"type:jsonb"`
-	ErrorMessage     string      `gorm:"type:varchar"`
+	ErrorMessage     string      `gorm:"type:text"`
+	RetryCount       int         `gorm:"type:integer;not null;default:0"`
 
-	CreatedAt time.Time      `gorm:"autoCreateTime"`
-	UpdatedAt time.Time      `gorm:"autoUpdateTime"`
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }

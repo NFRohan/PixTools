@@ -32,10 +32,10 @@ type Config struct {
 func LoadConfig() (*Config, error) {
 	_ = godotenv.Load() // Ignore error, env might be set by Docker/K8s
 
-	maxUploadStr := getEnvOrDefault("MAX_UPLOAD_BYTES", "52428800") // 50MB default
+	maxUploadStr := getEnvOrDefault("MAX_UPLOAD_BYTES", "10485760") // 10MB default
 	maxUpload, err := strconv.ParseInt(maxUploadStr, 10, 64)
 	if err != nil {
-		maxUpload = 52428800
+		maxUpload = 10485760
 	}
 
 	mimeTypesStr := getEnvOrDefault("ACCEPTED_MIME_TYPES", "image/jpeg,image/png,image/webp,image/avif")

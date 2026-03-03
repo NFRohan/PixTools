@@ -40,12 +40,29 @@ func (s *IdempotencyService) CheckIdempotency(ctx context.Context, key string) (
 	return val, nil // cache hit
 }
 
+// Ping verifies Redis reachability for health checks.
+func (s *IdempotencyService) Ping(ctx context.Context) error {
+	if err := s.client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("redis ping failed: %w", err)
+	}
+	return nil
+}
+
 // SetIdempotency sets a key in Redis with a 24-hour TTL
 func (s *IdempotencyService) SetIdempotency(ctx context.Context, key, jobID string) error {
 	redisKey := fmt.Sprintf("idempotency:%s", key)
 	err := s.client.Set(ctx, redisKey, jobID, 24*time.Hour).Err()
 	if err != nil {
 		return fmt.Errorf("redis set failed: %w", err)
+	}
+	return nil
+}
+
+// DeleteIdempotency removes a key from Redis after failed job creation/enqueue.
+func (s *IdempotencyService) DeleteIdempotency(ctx context.Context, key string) error {
+	redisKey := fmt.Sprintf("idempotency:%s", key)
+	if err := s.client.Del(ctx, redisKey).Err(); err != nil {
+		return fmt.Errorf("redis delete failed: %w", err)
 	}
 	return nil
 }

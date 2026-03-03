@@ -49,6 +49,7 @@ const tplHistoryItem = document.getElementById('tpl-history-item');
 const STORAGE_KEY = 'pixtools_jobs';
 const HISTORY_LIMIT = 10;
 const RETENTION_HOURS = 24;
+const API_KEY = globalThis.__PIXTOOLS_CONFIG__?.apiKey || '';
 
 let currentFile = null;
 let currentExt = null;
@@ -291,9 +292,9 @@ btnProcess.addEventListener('click', async () => {
     try {
         const response = await fetchWithTimeout('/api/process', {
             method: 'POST',
-            headers: {
+            headers: buildApiHeaders({
                 'Idempotency-Key': idempotencyKey
-            },
+            }),
             body: formData // No Content-Type header needed for FormData
         }, PROCESS_TIMEOUT_MS);
 
@@ -342,7 +343,9 @@ function startPolling(jobId) {
                 return;
             }
 
-            const response = await fetch(`/api/jobs/${jobId}`);
+            const response = await fetch(`/api/jobs/${jobId}`, {
+                headers: buildApiHeaders()
+            });
             if (currentPollToken !== pollToken) {
                 return;
             }
@@ -554,7 +557,9 @@ async function loadHistoryFromStorage() {
 
     // Fetch details for each job
     // We do this sequentially to avoid overwhelming the server, or use Promise.all
-    const jobDataPromises = jobs.map(id => fetch(`/api/jobs/${id}`).then(r => r.ok ? r.json() : null));
+    const jobDataPromises = jobs.map(id => fetch(`/api/jobs/${id}`, {
+        headers: buildApiHeaders()
+    }).then(r => r.ok ? r.json() : null));
     const allJobs = await Promise.all(jobDataPromises);
     const validIds = [];
 
@@ -624,6 +629,14 @@ async function fetchWithTimeout(resource, options = {}, timeoutMs = 30000) {
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+function buildApiHeaders(extraHeaders = {}) {
+    const headers = { ...extraHeaders };
+    if (API_KEY) {
+        headers['X-API-Key'] = API_KEY;
+    }
+    return headers;
 }
 
 function generateIdempotencyKey() {

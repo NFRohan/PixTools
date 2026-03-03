@@ -1,36 +1,120 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/streadway/amqp"
 )
 
-// HealthCheck provides dependency readiness probes
+func (s *Server) Livez(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "alive"})
+}
+
+func (s *Server) Readyz(c *gin.Context) {
+	dependencies := map[string]string{
+		"database": "ok",
+		"redis":    "ok",
+		"rabbitmq": "ok",
+	}
+
+	if !s.checkDatabase(c.Request.Context()) {
+		dependencies["database"] = "unreachable"
+	}
+	if !s.checkRedis(c.Request.Context()) {
+		dependencies["redis"] = "unreachable"
+	}
+	if !s.checkRabbitMQ() {
+		dependencies["rabbitmq"] = "unreachable"
+	}
+
+	s.respondHealth(c, dependencies)
+}
+
+// HealthCheck provides deep dependency readiness probes.
 func (s *Server) HealthCheck(c *gin.Context) {
-	// Simple connection checks to dependencies
+	dependencies := map[string]string{
+		"database": "ok",
+		"redis":    "ok",
+		"rabbitmq": "ok",
+		"s3":       "ok",
+	}
+
+	if !s.checkDatabase(c.Request.Context()) {
+		dependencies["database"] = "unreachable"
+	}
+	if !s.checkRedis(c.Request.Context()) {
+		dependencies["redis"] = "unreachable"
+	}
+	if !s.checkRabbitMQ() {
+		dependencies["rabbitmq"] = "unreachable"
+	}
+	if !s.checkS3(c.Request.Context()) {
+		dependencies["s3"] = "unreachable"
+	}
+
+	s.respondHealth(c, dependencies)
+}
+
+func (s *Server) respondHealth(c *gin.Context, dependencies map[string]string) {
+	healthy := true
+	for _, state := range dependencies {
+		if state != "ok" {
+			healthy = false
+			break
+		}
+	}
+
+	payload := gin.H{
+		"status":       "healthy",
+		"dependencies": dependencies,
+	}
+	if !healthy {
+		payload["status"] = "unhealthy"
+		c.JSON(http.StatusServiceUnavailable, payload)
+		return
+	}
+
+	c.JSON(http.StatusOK, payload)
+}
+
+func (s *Server) checkDatabase(ctx context.Context) bool {
 	sqlDB, err := s.DB.DB()
-	dbStatus := "OK"
-	if err != nil || sqlDB.Ping() != nil {
-		dbStatus = "DOWN"
+	if err != nil {
+		return false
 	}
 
-	// Idempotency check implies Redis Ping
-	redisStatus := "OK"
-	if _, err := s.Idempotency.CheckIdempotency(c.Request.Context(), "ping"); err != nil {
-		redisStatus = "DOWN"
-	}
+	healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 
-	status := http.StatusOK
-	if dbStatus == "DOWN" || redisStatus == "DOWN" {
-		status = http.StatusServiceUnavailable
-	}
+	return sqlDB.PingContext(healthCtx) == nil
+}
 
-	c.JSON(status, gin.H{
-		"status": "OK",
-		"checks": gin.H{
-			"db":    dbStatus,
-			"redis": redisStatus,
-		},
+func (s *Server) checkRedis(ctx context.Context) bool {
+	healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	return s.Idempotency.Ping(healthCtx) == nil
+}
+
+func (s *Server) checkRabbitMQ() bool {
+	conn, err := amqp.DialConfig(s.Config.RabbitMQURL, amqp.Config{
+		Heartbeat: 5 * time.Second,
+		Locale:    "en_US",
+		Dial:      amqp.DefaultDial(2 * time.Second),
 	})
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func (s *Server) checkS3(ctx context.Context) bool {
+	healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	return s.S3.CheckBucket(healthCtx) == nil
 }

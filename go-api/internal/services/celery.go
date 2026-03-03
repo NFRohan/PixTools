@@ -1,108 +1,216 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
-	"github.com/gocelery/gocelery"
-	"github.com/gomodule/redigo/redis"
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 )
 
-type CeleryService struct {
-	client *gocelery.CeleryClient
+const defaultQueueName = "default_queue"
+const deadLetterQueueName = "dead_letter"
+const deadLetterExchangeName = "dlx"
+
+type celeryTaskMessage struct {
+	ID      string                 `json:"id"`
+	Task    string                 `json:"task"`
+	Args    []interface{}          `json:"args"`
+	Kwargs  map[string]interface{} `json:"kwargs"`
+	Retries int                    `json:"retries"`
+	ETA     *string                `json:"eta"`
+	Expires *time.Time             `json:"expires"`
 }
 
-// NewCeleryService creates a Celery client that publishes to our RabbitMQ instance
-func NewCeleryService(rabbitmqURL, redisURL string) (*CeleryService, error) {
-	// 1. Initialize Redis Backend (Celery store results in Redis)
-	redisPool := &redis.Pool{
-		MaxIdle:     3,
-		IdleTimeout: 240 * time.Second,
-		Dial: func() (redis.Conn, error) {
-			return redis.DialURL(redisURL)
-		},
-	}
-	celeryBackend := gocelery.NewRedisBackend(redisPool)
+type CeleryService struct {
+	conn *amqp.Connection
+	mu   sync.Mutex
+}
 
-	// Manually dial and create channel to avoid gocelery's panicking constructor
-	// gocelery.NewAMQPCeleryBroker connects and declares with auto_delete=true immediately.
+type publishSpec struct {
+	taskName string
+	kwargs   map[string]interface{}
+}
+
+// NewCeleryService creates an AMQP publisher compatible with the Python Celery workers.
+func NewCeleryService(rabbitmqURL string) (*CeleryService, error) {
 	conn, err := amqp.Dial(rabbitmqURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial rabbitmq: %w", err)
 	}
-	channel, err := conn.Channel()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open rabbitmq channel: %w", err)
-	}
 
-	celeryBroker := &gocelery.AMQPCeleryBroker{
-		Connection: conn,
-		Channel:    channel,
-		Exchange: &gocelery.AMQPExchange{
-			Name:       "default",
-			Type:       "direct",
-			Durable:    true,
-			AutoDelete: false, // Match Python!
-		},
-		Queue: &gocelery.AMQPQueue{
-			Name:       "default",
-			Durable:    true,
-			AutoDelete: false,
-		},
-	}
-
-	// Reliance on gocelery's internal declaration during task submission.
-	// The settings in celeryBroker.Exchange/Queue will be honored.
-	client, err := gocelery.NewCeleryClient(celeryBroker, celeryBackend, 1)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init celery client: %w", err)
-	}
-
-	return &CeleryService{client: client}, nil
+	return &CeleryService{conn: conn}, nil
 }
 
-// SubmitDAGRouterTask sends the orchestration message to the Python router task
-// Using the exact import path required by Python's `@app.task`
-func (s *CeleryService) SubmitDAGRouterTask(jobID, s3RawKey string, operations []string, operationParams map[string]interface{}, requestID string, enqueuedAt time.Time) error {
-	// Our python function:
-	// @app.task(name="app.tasks.router.start_pipeline")
-	// def start_pipeline(job_id: str, s3_raw_key: str, operations: list[str], params: dict)
-
-	taskName := "app.tasks.router.start_pipeline"
-
-	// Convert kwargs properly
-	kwargs := map[string]interface{}{
-		"job_id":           jobID,
-		"s3_raw_key":       s3RawKey,
-		"operations":       operations,
-		"operation_params": operationParams,
-	}
-
-	// Because gocelery.Delay doesn't natively support setting specific AMQP headers (like X-Request-ID)
-	// easily, we'll pass standard kwargs and let Python handle it. If we absolutely need headers,
-	// we will construct the backend message manually in the future.
-	_, err := s.client.DelayKwargs(taskName, kwargs)
-	if err != nil {
-		return fmt.Errorf("failed to publish celery task: %w", err)
-	}
-
-	return nil
+// PublishJobTasks publishes the router/metadata tasks for a single API request.
+func (s *CeleryService) PublishJobTasks(
+	jobID,
+	s3RawKey string,
+	operations []string,
+	operationParams map[string]interface{},
+	metadataRequested bool,
+	requestID string,
+	enqueuedAt time.Time,
+) error {
+	specs := buildPublishSpecs(jobID, s3RawKey, operations, operationParams, metadataRequested, requestID, enqueuedAt)
+	return s.publishBatch(defaultQueueName, specs)
 }
 
-// SubmitMetadataTask submits the standalone metadata extraction task directly
-func (s *CeleryService) SubmitMetadataTask(jobID, s3RawKey string, markCompleted bool) error {
-	taskName := "app.tasks.metadata.extract_metadata"
+func buildPublishSpecs(
+	jobID,
+	s3RawKey string,
+	operations []string,
+	operationParams map[string]interface{},
+	metadataRequested bool,
+	requestID string,
+	enqueuedAt time.Time,
+) []publishSpec {
+	specs := make([]publishSpec, 0, 2)
+	enqueueAt := formatEnqueuedAt(enqueuedAt)
 
-	kwargs := map[string]interface{}{
-		"job_id":         jobID,
-		"s3_raw_key":     s3RawKey,
-		"mark_completed": markCompleted,
+	if len(operations) > 0 {
+		specs = append(specs, publishSpec{
+			taskName: "app.tasks.router.start_pipeline",
+			kwargs: map[string]interface{}{
+				"job_id":           jobID,
+				"s3_raw_key":       s3RawKey,
+				"operations":       operations,
+				"operation_params": operationParams,
+				"request_id":       requestID,
+				"enqueued_at":      enqueueAt,
+			},
+		})
 	}
 
-	_, err := s.client.DelayKwargs(taskName, kwargs)
+	if metadataRequested {
+		specs = append(specs, publishSpec{
+			taskName: "app.tasks.metadata.extract_metadata",
+			kwargs: map[string]interface{}{
+				"job_id":         jobID,
+				"s3_raw_key":     s3RawKey,
+				"mark_completed": len(operations) == 0,
+				"request_id":     requestID,
+				"enqueued_at":    enqueueAt,
+			},
+		})
+	}
+
+	return specs
+}
+
+func formatEnqueuedAt(enqueuedAt time.Time) string {
+	return fmt.Sprintf("%.6f", float64(enqueuedAt.UnixNano())/float64(time.Second))
+}
+
+func newCeleryTaskMessage(spec publishSpec) celeryTaskMessage {
+	return celeryTaskMessage{
+		ID:      uuid.NewString(),
+		Task:    spec.taskName,
+		Args:    []interface{}{},
+		Kwargs:  spec.kwargs,
+		Retries: 0,
+		ETA:     nil,
+		Expires: nil,
+	}
+}
+
+func (s *CeleryService) publishBatch(queueName string, specs []publishSpec) error {
+	if len(specs) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ch, err := s.conn.Channel()
 	if err != nil {
-		return fmt.Errorf("failed to publish metadata celery task: %w", err)
+		return fmt.Errorf("failed to open rabbitmq channel: %w", err)
+	}
+	defer ch.Close()
+
+	if err := ch.ExchangeDeclare(
+		deadLetterExchangeName,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare dead letter exchange: %w", err)
+	}
+
+	if _, err := ch.QueueDeclare(
+		deadLetterQueueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare dead letter queue: %w", err)
+	}
+
+	if err := ch.QueueBind(
+		deadLetterQueueName,
+		deadLetterQueueName,
+		deadLetterExchangeName,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to bind dead letter queue: %w", err)
+	}
+
+	_, err = ch.QueueDeclare(
+		queueName,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange":    deadLetterExchangeName,
+			"x-dead-letter-routing-key": deadLetterQueueName,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare queue %s: %w", queueName, err)
+	}
+
+	if err := ch.Tx(); err != nil {
+		return fmt.Errorf("failed to start rabbitmq transaction: %w", err)
+	}
+
+	for _, spec := range specs {
+		message := newCeleryTaskMessage(spec)
+
+		body, err := json.Marshal(message)
+		if err != nil {
+			_ = ch.TxRollback()
+			return fmt.Errorf("failed to marshal celery task: %w", err)
+		}
+
+		if err := ch.Publish(
+			"",
+			queueName,
+			false,
+			false,
+			amqp.Publishing{
+				DeliveryMode: amqp.Persistent,
+				Timestamp:    time.Now().UTC(),
+				ContentType:  "application/json",
+				Body:         body,
+			},
+		); err != nil {
+			_ = ch.TxRollback()
+			return fmt.Errorf("failed to publish celery task to %s: %w", queueName, err)
+		}
+	}
+
+	if err := ch.TxCommit(); err != nil {
+		_ = ch.TxRollback()
+		return fmt.Errorf("failed to commit rabbitmq publish transaction: %w", err)
 	}
 
 	return nil

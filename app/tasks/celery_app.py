@@ -111,10 +111,12 @@ _task_start_times: dict[str, float] = {}
 _task_start_lock = threading.Lock()
 
 
-def _parse_enqueued_at(headers: dict | None) -> float | None:
-    if not headers:
-        return None
-    raw = headers.get("X-Job-Enqueued-At")
+def _parse_enqueued_at(headers: dict | None, task_kwargs: dict | None = None) -> float | None:
+    raw = None
+    if headers:
+        raw = headers.get("X-Job-Enqueued-At")
+    if raw is None and task_kwargs:
+        raw = task_kwargs.get("enqueued_at")
     if raw is None:
         return None
     try:
@@ -162,7 +164,7 @@ def on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **extra):  #
     retry_count = int(getattr(task.request, "retries", 0))
     started_at = time.time()
 
-    enqueued_at = _parse_enqueued_at(headers)
+    enqueued_at = _parse_enqueued_at(headers, task_kwargs)
     if enqueued_at is not None:
         queue_wait_seconds = max(0.0, started_at - enqueued_at)
         job_queue_wait_seconds.labels(task_name=task_name).observe(queue_wait_seconds)

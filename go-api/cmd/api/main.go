@@ -10,7 +10,6 @@ import (
 
 	"github.com/NFRohan/PixTools/go-api/internal/config"
 	"github.com/NFRohan/PixTools/go-api/internal/handlers"
-	"github.com/NFRohan/PixTools/go-api/internal/models"
 	"github.com/NFRohan/PixTools/go-api/internal/services"
 	"github.com/NFRohan/PixTools/go-api/internal/telemetry"
 )
@@ -28,12 +27,6 @@ func main() {
 		log.Fatalf("Failed to connect to postgres: %v", err)
 	}
 
-	// GORM AutoMigrate (takes over from Python's Alembic)
-	log.Println("Running database migrations...")
-	if err := db.AutoMigrate(&models.Job{}); err != nil {
-		log.Fatalf("Failed to explicitly run automigrate: %v", err)
-	}
-
 	// 3. Connect to Redis
 	idemSvc, err := services.NewIdempotencyService(cfg.RedisURL)
 	if err != nil {
@@ -41,7 +34,7 @@ func main() {
 	}
 
 	// 4. Connect to RabbitMQ (Celery)
-	celerySvc, err := services.NewCeleryService(cfg.RabbitMQURL, cfg.RedisURL)
+	celerySvc, err := services.NewCeleryService(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to start celery client: %v", err)
 	}
