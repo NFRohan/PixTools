@@ -2,7 +2,6 @@
 
 import logging
 
-from app.services.dag_builder import build_dag
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -32,6 +31,8 @@ def start_pipeline(
     Python receives it and constructs the complex parallel chord/group
     which native gocelery struggles to serialize directly.
     """
+    from app.services.dag_builder import build_dag
+
     logger.info("Go API requested pipeline start for job %s", job_id)
 
     build_dag(
