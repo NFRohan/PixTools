@@ -16,6 +16,8 @@ from celery.signals import (
     task_retry,
 )
 from kombu import Exchange, Queue
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.logging_config import job_id_ctx, request_id_ctx, setup_logging
@@ -26,6 +28,7 @@ from app.metrics import (
     worker_task_processing_seconds,
 )
 from app.observability import setup_celery_observability
+from app.models import Job, JobStatus
 
 # --- Celery App ---
 celery_app = Celery(
@@ -110,6 +113,7 @@ setup_celery_observability()
 logger = logging.getLogger(__name__)
 _task_start_times: dict[str, float] = {}
 _task_start_lock = threading.Lock()
+_sync_engine = None
 
 
 def _parse_enqueued_at(headers: dict | None, task_kwargs: dict | None = None) -> float | None:
@@ -124,6 +128,31 @@ def _parse_enqueued_at(headers: dict | None, task_kwargs: dict | None = None) ->
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _get_sync_engine():
+    global _sync_engine
+    if _sync_engine is None:
+        sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
+        _sync_engine = create_engine(sync_url)
+    return _sync_engine
+
+
+def _set_job_status(job_id: str | None, status: JobStatus, error_message: str | None = None) -> None:
+    if not job_id:
+        return
+
+    try:
+        with Session(_get_sync_engine()) as session:
+            job = session.get(Job, job_id)
+            if not job:
+                return
+            job.status = status
+            if error_message:
+                job.error_message = error_message
+            session.commit()
+    except Exception:
+        logger.exception("Failed to persist job status transition", extra={"job_id": job_id})
 
 
 # --- Import task modules so they register with the app ---
@@ -170,6 +199,14 @@ def on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **extra):  #
     if enqueued_at is not None:
         queue_wait_seconds = max(0.0, started_at - enqueued_at)
         job_queue_wait_seconds.labels(task_name=task_name).observe(queue_wait_seconds)
+
+    if (
+        job_id not in {"", "N/A"}
+        and not task_name.startswith("app.tasks.finalize.")
+        and not task_name.startswith("app.tasks.archive.")
+        and not task_name.startswith("app.tasks.maintenance.")
+    ):
+        _set_job_status(job_id, JobStatus.PROCESSING)
 
     if task_id:
         with _task_start_lock:
@@ -262,6 +299,9 @@ def on_task_failure(
 ):  # noqa: ARG001
     """Track terminal task failures."""
     task_name = str(getattr(sender, "name", sender or "unknown"))
+    job_id = (kwargs or {}).get("job_id")
+    if job_id:
+        _set_job_status(job_id, JobStatus.FAILED, str(exception) if exception else "unknown")
     task_failure_total.labels(task_name=task_name).inc()
     logger.error(
         "task_failure",
@@ -270,7 +310,7 @@ def on_task_failure(
             "data": {
                 "task_id": task_id,
                 "task_name": task_name,
-                "job_id": (kwargs or {}).get("job_id"),
+                "job_id": job_id,
                 "error": str(exception) if exception else "unknown",
                 "worker_id": "unknown",
                 "traceback": str(einfo) if einfo else None,

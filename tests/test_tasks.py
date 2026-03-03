@@ -43,6 +43,23 @@ def test_router_task_is_registered():
     """The Go API publishes this task name directly; workers must register it."""
     assert "app.tasks.router.start_pipeline" in celery_app.tasks
 
+
+def test_set_job_status_persists_failure():
+    """Terminal worker failures should move the job out of PENDING."""
+    with patch("app.tasks.celery_app.Session") as mock_session_cls:
+        from app.tasks.celery_app import _set_job_status
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+        mock_job = MagicMock(spec=Job)
+        mock_session.get.return_value = mock_job
+
+        _set_job_status("job-123", JobStatus.FAILED, "boom")
+
+        assert mock_job.status == JobStatus.FAILED
+        assert mock_job.error_message == "boom"
+        mock_session.commit.assert_called_once()
+
 def test_finalize_job_logic(db_session):
     """Test the job finalization logic and DB updates."""
     # Celery tasks use sync engines, but our test session is async.
