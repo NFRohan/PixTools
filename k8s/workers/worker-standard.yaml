@@ -32,7 +32,7 @@ spec:
             - worker
             - -Q
             - default_queue
-            - --concurrency=6
+            - --concurrency=2
             - --loglevel=info
           envFrom:
             - configMapRef:
@@ -42,7 +42,7 @@ spec:
           resources:
             requests:
               cpu: "250m"
-              memory: "320Mi"
+              memory: "512Mi"
             limits:
               cpu: "900m"
-              memory: "768Mi"
+              memory: "1280Mi"
