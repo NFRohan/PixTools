@@ -28,8 +28,9 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 WORKDIR /app
 
-# Copy the static binary
+# Copy the static binary and assets
 COPY --from=builder /app/api .
+COPY static ./static
 
 # Expose port
 EXPOSE 8000

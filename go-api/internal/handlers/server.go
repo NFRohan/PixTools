@@ -48,4 +48,12 @@ func (s *Server) setupRoutes() {
 		api.POST("/process", s.CreateJob)
 		api.GET("/jobs/:id", s.GetJob)
 	}
+
+	// Serve static files
+	s.Router.Static("/static", "./static")
+
+	// Root redirect/serving
+	s.Router.GET("/", func(c *gin.Context) {
+		c.File("./static/index.html")
+	})
 }

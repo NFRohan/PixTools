@@ -51,7 +51,7 @@ flowchart TD
       end
       
       subgraph WorkloadNode["Workload Nodes (Spot m7i-flex.large, max 3)"]
-        API(FastAPI App)
+        API(Go API)
         W_STD(Celery Worker Standard)
         W_ML(Celery Worker ML)
         NTH(AWS Node Termination Handler)
@@ -91,7 +91,7 @@ flowchart TD
 
 | Component | Implementation | Rationale |
 | :--- | :--- | :--- |
-| **Ingress & API** | AWS ALB Controller -> K3s Pods -> FastAPI | Horizontally scalable edge routing with built-in health probing. |
+| **Ingress & API** | AWS ALB Controller -> K3s Pods -> Go (Gin) | Horizontally scalable edge routing with a 14MB compiled binary. |
 | **Message Broker** | RabbitMQ (StatefulSet) | Durable, persistent queueing with Dead Letter Exchanges for failed tasks. |
 | **State & Locking** | Redis & PostgreSQL 16 (AWS RDS) | Separated transient lock/idempotency state (Redis) from persistent job tracking (RDS). |
 | **Control Plane** | **K3s Server on On-Demand EC2** | Ensures cluster stability. Stateful tracking, locking, and control-plane metrics are isolated from the chaos of Spot terminations. |
@@ -138,6 +138,13 @@ The original spot instance handler was a hand-rolled bash script running as a `s
 ### The Ghost Label Problem
 New spot agent nodes would join the K3s cluster successfully, but pods requiring `nodeSelector: pixtools-workload-app=true` would stay stuck in `Pending` indefinitely. The `reconcile-cluster.sh` script *did* label nodes by querying EC2 tags, but it only ran during initial deployment — not when a fresh spot instance replaced a terminated one mid-day.
 **The Fix:** Baked the label directly into the K3s agent install command using `--node-label=pixtools-workload-app=true` in the EC2 user data template. Now every agent node is instantly schedulable the moment it joins the cluster, with zero reliance on external labeling scripts.
+
+### The Go Rewrite (Killing Python's 400MB Image)
+The FastAPI API container ran Python 3.12 with ~400MB of dependencies. Every cold start pulled hundreds of megabytes, and the runtime memory sat at ~200MB per pod. For an API that just validates a form, uploads to S3, and publishes a RabbitMQ message, that's absurd.
+**The Rewrite:** Replaced the entire FastAPI service with a compiled Go binary using Gin, GORM, and `gocelery`. The new multi-stage Dockerfile produces a **14MB scratch image** — a 96% reduction. Memory usage dropped to ~20MB per pod, and CPU requests went from 200m to 20m.
+**The Celery Trap:** Go can't natively construct Celery's complex `chord`/`chain` Canvas primitives. Instead of fighting `gocelery`'s serialization, the Go API fires a single `tasks.router.start_pipeline` task. A Python worker receives it and constructs the full DAG internally — bridging Go speed with Python's Celery fluency.
+**The `asyncpg` Dialect Crash:** The Go binary booted cleanly locally but entered `CrashLoopBackOff` in production. The SSM-injected `DATABASE_URL` used Python's `postgresql+asyncpg://` scheme, which Go's `pgx` driver rejected as an invalid keyword. A one-line `strings.Replace` to strip `+asyncpg` fixed it.
+**The NTH Scheduling Lock:** Even after uncordoning the only live agent node, pods stayed `Pending`. The AWS Node Termination Handler had silently applied a `NoSchedule` taint (`aws-node-termination-handler/rebalance-recommendation`) after receiving a spot rebalance event — and `kubectl uncordon` doesn't remove custom taints. Manually removing the NTH taint unblocked scheduling instantly.
 
 ### Additional Highlights:
 * **Asynchronous Orchestration:** Decoupled the FastAPI ingress from heavy compute tasks using RabbitMQ and Celery. Dedicated worker queues (`default_queue` vs. `ml_inference_queue`) prevent long-running ML jobs from starving standard conversion tasks.
@@ -418,20 +425,28 @@ Optional flags:
 
 ```text
 app/
-  routers/         FastAPI endpoints (health, jobs)
+  routers/         FastAPI endpoints (health, jobs) — legacy, retained for Celery workers
   services/        S3, idempotency, webhook, DAG builder
-  tasks/           Celery tasks (image_ops, ml_ops, metadata, archive, finalize, maintenance)
+  tasks/           Celery tasks (image_ops, ml_ops, metadata, archive, finalize, maintenance, router)
   static/          Frontend (HTML/CSS/JS)
   ml/              DnCNN model definition
   observability.py OpenTelemetry + Prometheus metrics wiring
   middleware.py    Request ID + metrics middleware
-alembic/           Schema migrations
+go-api/            Go API (replaces FastAPI for HTTP layer)
+  cmd/api/         Application entrypoint (main.go)
+  internal/
+    config/        Environment variable parsing (strips asyncpg dialect)
+    handlers/      Gin HTTP handlers (Server struct DI)
+    models/        GORM database models & validation structs
+    services/      S3, Celery, idempotency client wrappers
+    telemetry/     OpenTelemetry OTLP exporter setup
+alembic/           Schema migrations (legacy, superseded by GORM AutoMigrate)
 infra/             Terraform IaC (VPC, EC2, RDS, IAM, SSM, Security Groups)
   templates/       EC2 user data scripts for K3s server + agent bootstrap
 k8s/               Kubernetes manifests
   monitoring/      Alloy, Celery Exporter, AWS Node Termination Handler
   workers/         Celery Standard, ML, and Beat deployments
-  api/             FastAPI Deployment, Service, HPA
+  api/             Go API Deployment, Service, HPA
 scripts/deploy/    Manifest rendering, SSM reconciliation, and deploy helpers
 scripts/teardown/  Full environment teardown (PowerShell)
 bench/             k6 benchmark scenarios and measurement playbook
