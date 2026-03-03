@@ -69,9 +69,6 @@ func (s *Server) setupRoutes() {
 	s.Router.GET("/api/health", s.HealthCheck)
 
 	api := s.Router.Group("/api")
-	if s.Config.APIKey != "" {
-		api.Use(s.apiKeyMiddleware())
-	}
 	{
 		api.POST("/process", s.CreateJob)
 		api.GET("/jobs/:id", s.GetJob)
