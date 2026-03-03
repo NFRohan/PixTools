@@ -239,6 +239,7 @@ apply_manifests() {
     "${MANIFEST_DIR}/api/deployment.yaml"
     "${MANIFEST_DIR}/api/hpa.yaml"
     "${MANIFEST_DIR}/workers/worker-standard.yaml"
+    "${MANIFEST_DIR}/workers/worker-standard-hpa.yaml"
     "${MANIFEST_DIR}/workers/worker-ml.yaml"
     "${MANIFEST_DIR}/workers/beat.yaml"
     "${MANIFEST_DIR}/ingress/ingress.yaml"
