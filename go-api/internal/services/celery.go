@@ -6,6 +6,7 @@ import (
 
 	"github.com/gocelery/gocelery"
 	"github.com/gomodule/redigo/redis"
+	"github.com/streadway/amqp"
 )
 
 type CeleryService struct {
@@ -24,24 +25,35 @@ func NewCeleryService(rabbitmqURL, redisURL string) (*CeleryService, error) {
 	}
 	celeryBackend := gocelery.NewRedisBackend(redisPool)
 
-	// 2. Initialize AMQP Broker with custom exchange settings to match Python
-	// Python Celery uses Exchange("default", type="direct", auto_delete=False)
-	celeryBroker := gocelery.NewAMQPCeleryBroker(rabbitmqURL)
-
-	// Manually configure exchange and queue to avoid the PRECONDITION_FAILED (406) error
-	// gocelery defaults auto_delete to true, which conflicts with Celery's default of false.
-	celeryBroker.Exchange = &gocelery.AMQPExchange{
-		Name:       "default",
-		Type:       "direct",
-		Durable:    true,
-		AutoDelete: false, // Match Python!
+	// Manually dial and create channel to avoid gocelery's panicking constructor
+	// gocelery.NewAMQPCeleryBroker connects and declares with auto_delete=true immediately.
+	conn, err := amqp.Dial(rabbitmqURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial rabbitmq: %w", err)
 	}
-	celeryBroker.Queue = &gocelery.AMQPQueue{
-		Name:       "default", // This is the routing key/queue name used by default for task emission
-		Durable:    true,
-		AutoDelete: false,
+	channel, err := conn.Channel()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open rabbitmq channel: %w", err)
 	}
 
+	celeryBroker := &gocelery.AMQPCeleryBroker{
+		Connection: conn,
+		Channel:    channel,
+		Exchange: &gocelery.AMQPExchange{
+			Name:       "default",
+			Type:       "direct",
+			Durable:    true,
+			AutoDelete: false, // Match Python!
+		},
+		Queue: &gocelery.AMQPQueue{
+			Name:       "default",
+			Durable:    true,
+			AutoDelete: false,
+		},
+	}
+
+	// Reliance on gocelery's internal declaration during task submission.
+	// The settings in celeryBroker.Exchange/Queue will be honored.
 	client, err := gocelery.NewCeleryClient(celeryBroker, celeryBackend, 1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init celery client: %w", err)
