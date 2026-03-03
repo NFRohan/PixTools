@@ -43,9 +43,13 @@ func LoadConfig() (*Config, error) {
 	obsEnabledStr := strings.ToLower(getEnvOrDefault("OBSERVABILITY_ENABLED", "false"))
 	obsEnabled := obsEnabledStr == "true" || obsEnabledStr == "1"
 
+	dbURL := getEnvOrDefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/pixtools")
+	// Python SQLAlchemy uses "postgresql+asyncpg://..." which Go's pgx cannot parse.
+	dbURL = strings.Replace(dbURL, "postgresql+asyncpg://", "postgresql://", 1)
+
 	return &Config{
 		Environment:          getEnvOrDefault("ENVIRONMENT", "local"),
-		DatabaseURL:          getEnvOrDefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/pixtools"),
+		DatabaseURL:          dbURL,
 		RedisURL:             getEnvOrDefault("REDIS_URL", "redis://localhost:6379/0"),
 		RabbitMQURL:          getEnvOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 		RabbitMQUser:         getEnvOrDefault("RABBITMQ_DEFAULT_USER", "guest"),
