@@ -37,7 +37,7 @@ spec:
                 name: pixtools-runtime
           readinessProbe:
             httpGet:
-              path: /api/readyz
+              path: /api/health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -45,16 +45,16 @@ spec:
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /api/livez
+              path: /api/health
               port: 8000
-            initialDelaySeconds: 60
+            initialDelaySeconds: 15
             periodSeconds: 30
             timeoutSeconds: 2
             failureThreshold: 3
           resources:
             requests:
-              cpu: "200m"
-              memory: "192Mi"
+              cpu: "20m"
+              memory: "32Mi"
             limits:
-              cpu: "800m"
-              memory: "640Mi"
+              cpu: "200m"
+              memory: "128Mi"
