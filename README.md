@@ -125,6 +125,47 @@ A normal request moves through the system like this:
 10. `bundle_results` creates `archives/{job_id}/bundle.zip` asynchronously.
 11. The frontend polls `GET /api/jobs/{job_id}` until results and the archive are available.
 
+### Go-to-Python Celery Handoff
+
+This is the most important handoff in the system. The Go API does not try to reimplement Celery Canvas semantics itself. It validates the request, persists the durable job record, and publishes a Celery-compatible AMQP message that the Python worker runtime already understands. The Python router task then expands that lightweight handoff into the full processing DAG.
+
+```mermaid
+sequenceDiagram
+  participant Browser
+  participant GoAPI as Go API
+  participant Redis
+  participant S3
+  participant Postgres
+  participant RabbitMQ
+  participant Router as Python router task
+  participant Workers as Python Celery workers
+  participant Finalize as finalize_job
+
+  Browser->>GoAPI: POST /api/process
+  GoAPI->>Redis: Check Idempotency-Key
+  Redis-->>GoAPI: miss
+  GoAPI->>S3: Upload raw/{job_id}/{filename}
+  S3-->>GoAPI: raw key
+  GoAPI->>Postgres: INSERT jobs(status=PENDING,...)
+  Postgres-->>GoAPI: committed job row
+  GoAPI->>RabbitMQ: Publish Celery-compatible AMQP envelope<br/>task=app.tasks.router.start_pipeline
+  GoAPI->>Redis: SET idempotency:{key} -> job_id
+  GoAPI-->>Browser: 202 Accepted + job_id
+
+  RabbitMQ-->>Router: Consume start_pipeline
+  Router->>Router: Build Celery chord/group from operations
+  Router->>RabbitMQ: Enqueue image_ops / ml_ops / metadata tasks
+
+  RabbitMQ-->>Workers: Deliver operation tasks
+  Workers->>S3: Download raw image
+  Workers->>S3: Upload processed outputs
+  Workers-->>Finalize: Return result keys
+
+  Finalize->>Postgres: Persist result_keys, result_urls, status
+  Finalize->>RabbitMQ: Enqueue bundle_results
+  Finalize-->>Browser: Job becomes pollable as completed
+```
+
 For the exhaustive workflow, including S3 key patterns, queue semantics, status transitions, and failure branches, see `system_workflow.md`.
 
 ## Public API Surface
