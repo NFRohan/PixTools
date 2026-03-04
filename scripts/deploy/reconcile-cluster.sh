@@ -90,6 +90,52 @@ kubectl_apply_with_retry() {
   return 1
 }
 
+statefulset_storage_class() {
+  local namespace="$1"
+  local name="$2"
+
+  kubectl -n "${namespace}" get statefulset "${name}" -o json | \
+    jq -r '.spec.volumeClaimTemplates[0].spec.storageClassName // ""' 2>/dev/null || true
+}
+
+manifest_storage_class() {
+  local file="$1"
+
+  kubectl create --dry-run=client -f "${file}" -o json | \
+    jq -r '.spec.volumeClaimTemplates[0].spec.storageClassName // ""' 2>/dev/null || true
+}
+
+rabbitmq_storage_migration_pending() {
+  local file="$1"
+  local current_storage_class=""
+  local desired_storage_class=""
+
+  if ! kubectl -n "${NAMESPACE}" get statefulset rabbitmq >/dev/null 2>&1; then
+    return 1
+  fi
+
+  current_storage_class="$(statefulset_storage_class "${NAMESPACE}" rabbitmq)"
+  desired_storage_class="$(manifest_storage_class "${file}")"
+
+  [[ -n "${desired_storage_class}" ]] || return 1
+  [[ "${current_storage_class}" != "${desired_storage_class}" ]]
+}
+
+apply_manifest_safely() {
+  local file="$1"
+
+  if [[ "${file}" == "${MANIFEST_DIR}/rabbitmq/statefulset.yaml" ]] && rabbitmq_storage_migration_pending "${file}"; then
+    local current_storage_class=""
+    local desired_storage_class=""
+    current_storage_class="$(statefulset_storage_class "${NAMESPACE}" rabbitmq)"
+    desired_storage_class="$(manifest_storage_class "${file}")"
+    log "Skipping RabbitMQ StatefulSet apply: storageClass migration ${current_storage_class:-<unset>} -> ${desired_storage_class} requires controlled maintenance via scripts/deploy/migrate-rabbitmq-to-gp3.sh"
+    return 0
+  fi
+
+  kubectl_apply_with_retry "${file}"
+}
+
 recover_keda_release_if_stuck() {
   local helm_status=""
   local stable_revision=""
@@ -463,7 +509,7 @@ apply_manifests() {
 
   for file in "${ordered_files[@]}"; do
     if [[ -f "${file}" ]]; then
-      kubectl_apply_with_retry "${file}"
+      apply_manifest_safely "${file}"
     fi
   done
 }
