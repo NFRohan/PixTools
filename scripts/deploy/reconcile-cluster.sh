@@ -49,6 +49,50 @@ normalize_url() {
   printf '%s' "${value}"
 }
 
+instance_state_for_node() {
+  local provider_id="${1:-}"
+  local instance_id=""
+  if [[ "${provider_id}" == *"/i-"* ]]; then
+    instance_id="${provider_id##*/}"
+  fi
+
+  if [[ -z "${instance_id}" ]]; then
+    printf '%s' "unknown"
+    return
+  fi
+
+  aws ec2 describe-instances \
+    --region "${AWS_REGION}" \
+    --instance-ids "${instance_id}" \
+    --query "Reservations[0].Instances[0].State.Name" \
+    --output text 2>/dev/null || printf '%s' "missing"
+}
+
+cleanup_stale_nodes() {
+  log "Cleaning stale Kubernetes nodes"
+
+  while IFS=$'\t' read -r node_name provider_id ready_status; do
+    [[ -z "${node_name}" ]] && continue
+
+    local instance_state
+    instance_state="$(instance_state_for_node "${provider_id}")"
+    if [[ "${ready_status}" != "True" && "${instance_state}" != "running" ]]; then
+      log "  deleting stale node ${node_name} (instance state: ${instance_state})"
+      kubectl delete node "${node_name}" --ignore-not-found=true >/dev/null || true
+    fi
+  done < <(kubectl get nodes -o json | jq -r '.items[] | [.metadata.name, (.spec.providerID // ""), ((.status.conditions[] | select(.type == "Ready") | .status) // "Unknown")] | @tsv')
+}
+
+cleanup_stale_terminating_pods() {
+  log "Force deleting stale terminating pods"
+
+  while IFS= read -r pod_name; do
+    [[ -z "${pod_name}" ]] && continue
+    log "  force deleting pod ${pod_name}"
+    kubectl -n "${NAMESPACE}" delete pod "${pod_name}" --force --grace-period=0 >/dev/null || true
+  done < <(kubectl -n "${NAMESPACE}" get pods -o json | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name')
+}
+
 # ============================================================
 # 1. Sync manifests from S3
 # ============================================================
@@ -286,6 +330,8 @@ main() {
   sync_manifests
   refresh_ecr_pull_secret
   sync_runtime_config
+  cleanup_stale_nodes
+  cleanup_stale_terminating_pods
   label_nodes_by_role
   apply_manifests
   wait_for_rollouts
