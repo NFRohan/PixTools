@@ -94,7 +94,7 @@ variable "workload_asg_desired" {
 variable "rds_instance_class" {
   description = "RDS instance class."
   type        = string
-  default     = "db.t4g.small"
+  default     = "db.t4g.micro"
 }
 
 variable "rds_engine_version" {

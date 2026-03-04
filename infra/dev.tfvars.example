@@ -16,8 +16,8 @@ workload_asg_min = 1
 workload_asg_desired = 1
 workload_asg_max = 4
 
-# Do not run the shared application + K3s datastore instance on the smallest RDS class.
-rds_instance_class = "db.t4g.small"
+# Recommended when the AWS account plan allows it:
+# rds_instance_class = "db.t4g.small"
 
 # Manifest sync prefix used by CD workflow.
 manifest_s3_prefix = "manifests/dev"
