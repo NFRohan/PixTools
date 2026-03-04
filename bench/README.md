@@ -38,6 +38,35 @@ These are emitted by the app/workers and can be queried in Grafana:
 
 ## Load Scenarios
 
+## Quick Scaling Smoke Test
+
+Use this before formal benchmarking to verify the live cluster accepts load and that the
+standard worker scales from RabbitMQ backlog.
+
+The wrapper:
+- runs the existing k6 scenario
+- resolves the active K3s server with AWS CLI
+- captures cluster snapshots over SSM before, during, and after the run
+- stores k6 output and cluster state under one timestamped result directory
+
+```powershell
+.\bench\run-small-stress.ps1 `
+  -BaseUrl "http://<ALB_DNS>" `
+  -ApiKey "<key>" `
+  -Scenario baseline `
+  -Vus 8 `
+  -Duration 2m
+```
+
+Useful options:
+- `-PollCompletion` to confirm jobs finish during the run
+- `-WatchIntervalSeconds 15` for denser cluster snapshots
+- `-SkipClusterWatch` if you only want the local k6 run
+
+Outputs:
+- `bench/results/small-stress-<timestamp>/baseline-summary.json`
+- `bench/results/small-stress-<timestamp>/cluster/*.txt`
+
 ## 1. Baseline
 
 Target: steady throughput and stable queue depth.
