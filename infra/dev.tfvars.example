@@ -5,12 +5,19 @@ aws_region  = "us-east-1"
 # allowed_ingress_cidrs = ["203.0.113.10/32"]
 allowed_ingress_cidrs = ["203.0.113.10/32"]
 
+# Keep infra above the smallest burstable class; K3s control-plane and stateful services
+# are not stable enough on t3.small once KEDA, Cluster Autoscaler, and broker state coexist.
+infra_instance_type = "t3.medium"
+
 # Pin workload compute to memory-optimized flex instances.
 workload_instance_type = "m7i-flex.large"
 workload_fallback_instance_types = []
 workload_asg_min = 1
 workload_asg_desired = 1
 workload_asg_max = 4
+
+# Do not run the shared application + K3s datastore instance on the smallest RDS class.
+rds_instance_class = "db.t4g.small"
 
 # Manifest sync prefix used by CD workflow.
 manifest_s3_prefix = "manifests/dev"

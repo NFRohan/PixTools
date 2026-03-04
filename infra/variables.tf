@@ -44,7 +44,7 @@ variable "allowed_ingress_cidrs" {
 variable "infra_instance_type" {
   description = "Instance type for the always-on K3s server / infra node."
   type        = string
-  default     = "t3.small"
+  default     = "t3.medium"
 }
 
 variable "infra_volume_size_gb" {
@@ -94,7 +94,7 @@ variable "workload_asg_desired" {
 variable "rds_instance_class" {
   description = "RDS instance class."
   type        = string
-  default     = "db.t4g.micro"
+  default     = "db.t4g.small"
 }
 
 variable "rds_engine_version" {

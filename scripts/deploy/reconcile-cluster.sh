@@ -180,6 +180,14 @@ install_keda() {
   return 1
 }
 
+tune_kube_system_control_plane_footprint() {
+  if kubectl -n kube-system get deployment aws-load-balancer-controller >/dev/null 2>&1; then
+    log "Scaling aws-load-balancer-controller to 1 replica on the infra node"
+    kubectl -n kube-system scale deployment aws-load-balancer-controller --replicas=1 >/dev/null
+    kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=180s >/dev/null || true
+  fi
+}
+
 instance_state_for_node() {
   local provider_id="${1:-}"
   local instance_id=""
@@ -475,6 +483,7 @@ main() {
   cleanup_stale_terminating_pods
   label_nodes_by_role
   install_keda
+  tune_kube_system_control_plane_footprint
   wait_for_apiserver 180
   cleanup_deprecated_autoscalers
   apply_manifests
