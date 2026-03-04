@@ -7,7 +7,8 @@ allowed_ingress_cidrs = ["203.0.113.10/32"]
 
 # Keep infra above the smallest burstable class; K3s control-plane and stateful services
 # are not stable enough on t3.small once KEDA, Cluster Autoscaler, and broker state coexist.
-infra_instance_type = "t3.medium"
+# This AWS account rejected t3.medium launches, so m7i-flex.large is the supported baseline.
+infra_instance_type = "m7i-flex.large"
 
 # Pin workload compute to memory-optimized flex instances.
 workload_instance_type = "m7i-flex.large"

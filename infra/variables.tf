@@ -44,7 +44,7 @@ variable "allowed_ingress_cidrs" {
 variable "infra_instance_type" {
   description = "Instance type for the always-on K3s server / infra node."
   type        = string
-  default     = "t3.medium"
+  default     = "m7i-flex.large"
 }
 
 variable "infra_volume_size_gb" {
