@@ -91,9 +91,11 @@ flowchart TD
 | Durable state | PostgreSQL 16 on RDS | Source of truth for job records |
 | Idempotency | Redis | Stores `Idempotency-Key -> job_id` mappings |
 | Object storage | S3 | Stores raw inputs, processed outputs, and ZIP bundles |
-| Orchestration | K3s | Self-hosted Kubernetes control plane on EC2 |
+| Orchestration | K3s | Self-hosted Kubernetes control plane on EC2 with role-based node labeling (`k3s-server` infra, `k3s-agent` app) |
+| Autoscaling | HPA + KEDA + Cluster Autoscaler | API scales via HPA, worker-standard scales from RabbitMQ queue depth via KEDA, nodes scale via AWS Cluster Autoscaler |
+| Stateful storage | AWS EBS CSI + `gp3` StorageClass | RabbitMQ data volume targets `gp3`; StatefulSet storage-class transitions are handled as controlled maintenance |
 | Ingress | AWS Load Balancer Controller | Uses AWS ALB and AWS-provided DNS name |
-| Telemetry | Alloy -> Grafana Cloud | Logs, metrics, and traces shipped off-cluster |
+| Telemetry | Alloy DaemonSet -> Grafana Cloud | Logs, metrics, and traces shipped off-cluster from each node |
 | Infrastructure | Terraform | VPC, EC2, IAM, RDS, S3, SSM, ECR, security groups |
 | Delivery | GitHub Actions + OIDC | CI and CD workflows authenticate to AWS with short-lived credentials |
 
@@ -111,10 +113,12 @@ ML does not have its own dedicated node class yet. That is an explicit decision,
 
 The active cloud design is a two-tier K3s deployment in `us-east-1`:
 
-- one stable on-demand `m7i-flex.large` infra node for control-plane and stateful cluster services
-- one or more spot `m7i-flex.large` workload nodes for the API and Celery workers
-- AWS RDS PostgreSQL in Single-AZ mode; the application database and K3s datastore still share the same instance today, so moving above micro remains the next account-plan-gated control-plane hardening step
-- RabbitMQ is being moved to AWS EBS-backed `gp3` storage so infra-node replacement no longer depends on K3s `local-path` volumes
+- one stable on-demand infra node for control-plane and stateful cluster services
+- one or more spot workload nodes for API and workers
+- app nodes are ASG-managed and discovered by Cluster Autoscaler through tags
+- RabbitMQ uses a PVC intended for EBS CSI-backed `gp3` storage
+- PodDisruptionBudgets protect Redis/RabbitMQ/API during disruption
+- PriorityClasses enforce infra-first scheduling during resource pressure
 - secrets and runtime config sourced from AWS Systems Manager Parameter Store
 - public demo ingress exposed through the AWS ALB DNS name, not a custom domain
 
@@ -181,10 +185,15 @@ For the exhaustive workflow, including S3 key patterns, queue semantics, status 
 
 ## Public API Surface
 
-Base path: `/api`
+HTTP surface:
+
+- root/static: `/`, `/static/*`, `/app-config.js`
+- metrics: `/metrics`
+- API base path: `/api`
 
 | Route | Method | Purpose |
 | --- | --- | --- |
+| `/metrics` | `GET` | Prometheus scrape endpoint exposed by the Go API |
 | `/api/livez` | `GET` | simple liveness probe |
 | `/api/readyz` | `GET` | readiness probe for DB, Redis, and RabbitMQ |
 | `/api/health` | `GET` | deep health check for DB, Redis, RabbitMQ, and S3 |
@@ -283,7 +292,8 @@ Current workload sizing in Kubernetes:
 | Beat | Celery Beat | `100m` CPU / `192Mi` memory | `300m` CPU / `384Mi` memory |
 | RabbitMQ | StatefulSet | `150m` CPU / `256Mi` memory | `500m` CPU / `512Mi` memory |
 | Redis | Deployment | `50m` CPU / `128Mi` memory | `200m` CPU / `256Mi` memory |
-| Alloy | Deployment | `100m` CPU / `128Mi` memory | `300m` CPU / `384Mi` memory |
+| Alloy | DaemonSet | `100m` CPU / `128Mi` memory | `300m` CPU / `384Mi` memory |
+| Cluster Autoscaler | Deployment | `50m` CPU / `128Mi` memory | `200m` CPU / `256Mi` memory |
 
 The standard worker was explicitly down-tuned to `--concurrency=2` after live OOM diagnosis on image fan-out workloads. That is not arbitrary tuning; it is the current stable operating point for the demo footprint.
 
@@ -301,7 +311,7 @@ S3 key patterns:
 
 ## Observability
 
-PixTools ships telemetry to Grafana Cloud through a lightweight in-cluster Alloy deployment.
+PixTools ships telemetry to Grafana Cloud through an in-cluster Alloy DaemonSet.
 
 Current observability stack:
 
@@ -322,10 +332,9 @@ What is currently instrumented:
 - task failure and retry counters
 - webhook circuit-breaker transitions
 - RabbitMQ queue depth gauges
+- Go API Prometheus scrape endpoint at `/metrics`
 
-Important current limitation:
-
-- the live Go API does not yet expose `/metrics` parity with the legacy Python API surface
+KEDA metrics-adapter auth now requires explicit RBAC delegation and `extension-apiserver-authentication-reader` binding for `keda-metrics-server`. These resources are declared in `k8s/autoscaling/keda-metrics-rbac.yaml` and applied by reconcile before KEDA Helm upgrade.
 
 <p align="center">
   <img src="images/grafana api.png" alt="Grafana metrics" width="100%"/>
@@ -371,10 +380,15 @@ The deployment flow is intentionally simple and reproducible:
 4. upload rendered artifacts to the manifests S3 bucket
 5. resolve the live K3s instance through AWS APIs
 6. run `scripts/deploy/reconcile-cluster.sh` over SSM
-7. refresh runtime secrets from SSM
-8. apply manifests in deterministic order
-9. wait for rollout completion
-10. run a smoke test against the deployed API
+7. inside reconcile: refresh runtime secrets/config from SSM Parameter Store
+8. inside reconcile: clean stale Kubernetes nodes and force-delete stale terminating pods
+9. inside reconcile: label nodes by EC2 `Role` tag (`k3s-server` infra / `k3s-agent` app)
+10. inside reconcile: install or upgrade AWS EBS CSI and KEDA
+11. inside reconcile: apply KEDA metrics RBAC prerequisites before KEDA startup
+12. inside reconcile: apply manifests in deterministic order with retry logic and API-server readiness checks
+13. inside reconcile: skip immutable RabbitMQ StatefulSet storage-class mutations and require controlled migration script
+14. inside reconcile: wait for rollout completion of infra and app workloads
+15. run smoke test against the deployed API
 
 Deployment helper scripts:
 
@@ -382,6 +396,8 @@ Deployment helper scripts:
 - `scripts/deploy/resolve-k3s-instance.sh`
 - `scripts/deploy/run-on-ssm.sh`
 - `scripts/deploy/reconcile-cluster.sh`
+- `scripts/deploy/migrate-rabbitmq-to-gp3.sh`
+- `scripts/deploy/ssm-keda-rbac-check.ps1`
 
 This is not kubectl-clickops. The cluster is reconciled through versioned artifacts and remote automation.
 
@@ -459,30 +475,51 @@ docker compose logs -f beat
 
 ## Benchmarking
 
-Load-testing and measurement scaffolding lives under `bench/`.
+Load-testing and performance evidence live under `bench/`.
 
-Included scenarios:
+Scenarios:
 
 - `bench/k6/baseline.js`
 - `bench/k6/spike.js`
 - `bench/k6/retry_storm.js`
 - `bench/k6/starvation_mix.js`
 
-Helper scripts:
+Execution tooling:
 
-- `bench/run-k6.ps1`
-- `bench/collect-grafana-metrics.ps1`
-- `bench/templates/benchmark-report-template.md`
+- `bench/run-k6.ps1` (single scenario)
+- `bench/run-small-stress.ps1` (quick smoke + cluster snapshots)
+- `bench/run-sprint5-validation.ps1` (baseline/spike acceptance workflow)
+- `bench/run-production-performance-suite.ps1` (in-region temporary runner + full scenario matrix + report)
+- `bench/collect-prod-run-logs.ps1` (API/worker/RabbitMQ/KEDA/autoscaler runtime evidence)
+- `bench/collect-grafana-metrics.ps1` (PromQL-backed metric extraction)
 
-Current benchmark pass/fail gates:
+### Latest in-region production suite snapshot
 
-- queue drain p95 after load stop: `<= 180s`
-- failed job ratio: `<= 1.0%`
-- in-region API p95: `<= 700ms`
-- standard worker saturation at max replicas: `<= 10m` continuous
-- no sustained `Pending` pods from CPU/memory pressure (`>2m`)
+Run window: 2026-03-04 UTC, region `us-east-1`, environment `dev`, executed from a temporary EC2 runner in-region.
 
-This exists so performance claims can be tied to repeatable scripts and captured metrics, not vague anecdotes.
+| Scenario | Load profile | Submitted | HTTP failed rate | HTTP p95 | Notable status counts |
+| --- | --- | --- | --- | --- | --- |
+| baseline | `30 VUs`, `10m` | 3779 | 0.00% | 651.65 ms | `202=3779`, `200=17790` |
+| spike | `120 VUs`, `5m` | 6119 | 3.65% | 8538.94 ms | `202=6119`, `500=201`, `0=31` |
+| retry_storm | `60 VUs`, `5m`, timeout `8s`, attempts `2` | 6461 | 0.22% | 3618.04 ms | `202=6461`, `500=11`, `0=3` |
+| starvation_mix | heavy `8 rps`, light `4 rps`, `8m` | heavy 3768 / light 1877 | 1.33% | 6136.97 ms (light p95: 5469.43 ms) | `202=5645`, `500=76` |
+
+Cross-scenario error taxonomy from that run:
+
+- observed hard failures: `500` (288) and transport-level `0` (34)
+- not observed: `409`, `429`, `502`, `503`, `504`
+
+### Sprint 5 readiness result
+
+Latest Sprint 5 readiness run passed baseline and replica-growth checks, but failed overall because automatic node scale-out was not observed under that specific probe shape. This is why node/pod ceilings and queue-pressure behavior remain the main scaling workstream.
+
+### What these benchmarks mean right now
+
+- steady-state behavior is healthy at moderate load
+- under burst and mixed heavy/light pressure, API latency and `500` rate degrade
+- worker/API replicas frequently hit configured max (`3`), so scale ceilings are a first-order constraint
+
+Benchmark pass/fail gates remain tracked in `bench/README.md` and `docs/scaling_guardrails.md`.
 
 ## Reference Docs
 
@@ -492,9 +529,13 @@ These files are the detailed source-of-truth documents for the current system:
 - `go_api_parity_patchlist.md` - migration parity checklist from the Python API to the Go API
 - `predeploy_blockers.md` - deploy review notes and intentional design debt
 - `bench/README.md` - benchmark execution notes
+- `bench/run-production-performance-suite.ps1` - full in-region production-style benchmark orchestrator
+- `bench/collect-prod-run-logs.ps1` - runtime log capture after benchmark windows
 - `docs/scaling_guardrails.md` - dashboard panel queries, alert conditions, and benchmark gates
 - `docs/runbooks/` - incident runbooks for backlog, scale-out failure, OOM recurrence, and spot interruption
 - `infra/README.md` - Terraform-specific notes
+
+Generated benchmark artifacts are written under `bench/results/` (gitignored) so each run keeps full raw evidence and summaries without polluting source control.
 
 ## Repository Layout
 
@@ -522,7 +563,10 @@ bench/             k6 scenarios and benchmark collection helpers
 docs/              scaling guardrails and runbooks
 infra/             Terraform IaC
 k8s/               Kubernetes manifests
+  autoscaling/     Cluster Autoscaler, KEDA values/scaled objects, KEDA metrics RBAC
+  storage/         EBS CSI Helm values and gp3 storage class
 scripts/deploy/    Deployment and reconciliation helpers
+  migrate-rabbitmq-to-gp3.sh  Controlled RabbitMQ PVC migration helper
 scripts/teardown/  Full AWS teardown tooling
 tests/             Python tests
 images/            README screenshots
@@ -565,7 +609,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\teardown\teardown-aws.ps1 -En
 
 ## Known Limitations
 
-- The Go API does not yet expose `/metrics` parity with the legacy FastAPI API.
+- Current autoscaling ceilings (`pixtools-api` max `3`, `pixtools-worker-standard` max `3`) are intentionally conservative and become the bottleneck under aggressive spike/retry profiles.
+- RabbitMQ StatefulSet storage-class spec is immutable; storage-class migration requires controlled maintenance via `scripts/deploy/migrate-rabbitmq-to-gp3.sh` instead of normal `kubectl apply`.
+- Retry-storm and mixed heavy/light scenarios still produce `500` responses and transport-level timeouts before any `429` admission/backpressure policy is applied.
 - The public demo uses the AWS ALB DNS name instead of a custom domain.
 - Security is intentionally demo-grade at the frontend edge because the UI is public and the API key is shipped through `/app-config.js`.
 - There is no transactional outbox yet; enqueue failures are compensated by marking the job failed.

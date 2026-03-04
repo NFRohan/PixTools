@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"gorm.io/gorm"
 
@@ -82,6 +83,7 @@ func (s *Server) apiKeyMiddleware() gin.HandlerFunc {
 
 func (s *Server) setupRoutes() {
 	// Public routes
+	s.Router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	s.Router.GET("/api/health", s.HealthCheck)
 	s.Router.GET("/api/readyz", s.Readyz)
 	s.Router.GET("/api/livez", s.Livez)

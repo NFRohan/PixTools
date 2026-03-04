@@ -80,6 +80,31 @@ Outputs:
 - `bench/results/small-stress-<timestamp>/baseline-summary.json`
 - `bench/results/small-stress-<timestamp>/cluster/*.txt`
 
+## Sprint 5 Readiness Validation
+
+Use this orchestrated runner to execute Sprint 5 acceptance checks end-to-end:
+
+```powershell
+.\bench\run-sprint5-validation.ps1 `
+  -BaseUrl "http://<ALB_DNS>" `
+  -ApiKey "<key>"
+```
+
+What it does:
+- runs controlled `baseline` then `spike`
+- captures cluster snapshots through SSM for each run
+- waits for post-spike settling
+- optionally runs a forced node scale-out probe
+- writes:
+  - `sprint5-readiness-summary.json`
+  - `sprint5-readiness-report.md`
+
+Default acceptance checks in the report:
+- baseline without stuck jobs
+- spike replica growth
+- node scale-out observed when needed
+- return close to baseline after load
+
 ## 1. Baseline
 
 Target: steady throughput and stable queue depth.

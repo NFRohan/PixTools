@@ -226,6 +226,17 @@ install_keda() {
   return 1
 }
 
+apply_keda_metrics_rbac_prereqs() {
+  local rbac_file="${MANIFEST_DIR}/autoscaling/keda-metrics-rbac.yaml"
+
+  if [[ ! -f "${rbac_file}" ]]; then
+    return
+  fi
+
+  log "Applying KEDA metrics API RBAC prerequisites"
+  kubectl_apply_with_retry "${rbac_file}"
+}
+
 install_aws_ebs_csi() {
   local values_file="${MANIFEST_DIR}/storage/aws-ebs-csi-values.yaml"
 
@@ -550,6 +561,7 @@ main() {
   cleanup_stale_terminating_pods
   label_nodes_by_role
   install_aws_ebs_csi
+  apply_keda_metrics_rbac_prereqs
   install_keda
   tune_kube_system_control_plane_footprint
   wait_for_apiserver 180
