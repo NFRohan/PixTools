@@ -23,6 +23,9 @@ These are replaced in CI/CD before sync to S3.
 - Queue-driven worker autoscaling is managed through KEDA:
   - KEDA itself is installed by `scripts/deploy/reconcile-cluster.sh`
   - in-repo scaler specs live under `k8s/autoscaling/`
+- Durable infra storage is provided through the AWS EBS CSI driver:
+  - installed by `scripts/deploy/reconcile-cluster.sh`
+  - in-repo storage manifests live under `k8s/storage/`
 - Node autoscaling is managed by Cluster Autoscaler:
   - autodiscovers only the workload ASG via AWS tags
   - runs on the fixed infra node
@@ -47,6 +50,13 @@ These are replaced in CI/CD before sync to S3.
   - ML remains on the general app pool for now; a dedicated ML node class is deferred until real contention or cost pressure justifies the extra ASG and scheduling complexity
 
 This means infra workloads never drift onto spot-backed app nodes, while app workloads still share the elastic pool in a controlled way.
+
+## Storage
+
+- `rabbitmq` should use the dedicated `gp3` StorageClass backed by the AWS EBS CSI driver.
+- Existing `local-path` RabbitMQ claims are not migrated automatically by CD because deleting them is destructive.
+- The one-time migration should be done during a controlled maintenance window by recreating the old `local-path` PVC/PV and letting the StatefulSet rebind on `gp3`.
+- The repo includes a one-shot helper for that maintenance window: `scripts/deploy/migrate-rabbitmq-to-gp3.sh`.
 
 ## Monitoring Components
 

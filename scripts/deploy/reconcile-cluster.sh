@@ -180,6 +180,26 @@ install_keda() {
   return 1
 }
 
+install_aws_ebs_csi() {
+  local values_file="${MANIFEST_DIR}/storage/aws-ebs-csi-values.yaml"
+
+  if [[ ! -f "${values_file}" ]]; then
+    log "AWS EBS CSI values file not found; skipping EBS CSI install"
+    return
+  fi
+
+  log "Installing or upgrading AWS EBS CSI driver"
+  helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver >/dev/null 2>&1 || true
+  helm repo update aws-ebs-csi-driver >/dev/null
+
+  helm upgrade --install aws-ebs-csi-driver aws-ebs-csi-driver/aws-ebs-csi-driver \
+    --namespace kube-system \
+    --version 2.40.0 \
+    -f "${values_file}" \
+    --wait \
+    --timeout 180s >/dev/null
+}
+
 tune_kube_system_control_plane_footprint() {
   if kubectl -n kube-system get deployment aws-load-balancer-controller >/dev/null 2>&1; then
     log "Scaling aws-load-balancer-controller to 1 replica on the infra node"
@@ -415,6 +435,7 @@ apply_manifests() {
   local ordered_files=(
     "${MANIFEST_DIR}/namespace.yaml"
     "${MANIFEST_DIR}/priorityclasses.yaml"
+    "${MANIFEST_DIR}/storage/gp3-storageclass.yaml"
     "${MANIFEST_DIR}/config/configmap.yaml"
     "${MANIFEST_DIR}/pdb/api-pdb.yaml"
     "${MANIFEST_DIR}/pdb/rabbitmq-pdb.yaml"
@@ -482,6 +503,7 @@ main() {
   cleanup_stale_nodes
   cleanup_stale_terminating_pods
   label_nodes_by_role
+  install_aws_ebs_csi
   install_keda
   tune_kube_system_control_plane_footprint
   wait_for_apiserver 180

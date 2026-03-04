@@ -114,6 +114,7 @@ The active cloud design is a two-tier K3s deployment in `us-east-1`:
 - one stable on-demand `m7i-flex.large` infra node for control-plane and stateful cluster services
 - one or more spot `m7i-flex.large` workload nodes for the API and Celery workers
 - AWS RDS PostgreSQL in Single-AZ mode; the application database and K3s datastore still share the same instance today, so moving above micro remains the next account-plan-gated control-plane hardening step
+- RabbitMQ is being moved to AWS EBS-backed `gp3` storage so infra-node replacement no longer depends on K3s `local-path` volumes
 - secrets and runtime config sourced from AWS Systems Manager Parameter Store
 - public demo ingress exposed through the AWS ALB DNS name, not a custom domain
 
