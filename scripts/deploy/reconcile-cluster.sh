@@ -310,6 +310,7 @@ apply_manifests() {
     "${MANIFEST_DIR}/monitoring/alloy-deployment.yaml"
     "${MANIFEST_DIR}/monitoring/celery-exporter.yaml"
     "${MANIFEST_DIR}/monitoring/aws-node-termination-handler.yaml"
+    "${MANIFEST_DIR}/autoscaling/cluster-autoscaler.yaml"
     "${MANIFEST_DIR}/api/service.yaml"
     "${MANIFEST_DIR}/api/deployment.yaml"
     "${MANIFEST_DIR}/api/hpa.yaml"
@@ -336,6 +337,7 @@ wait_for_rollouts() {
   # Infra workloads (on server node — should always be available)
   kubectl -n "${NAMESPACE}" rollout status deployment/redis --timeout=120s
   kubectl -n "${NAMESPACE}" rollout status statefulset/rabbitmq --timeout=180s
+  kubectl -n "${NAMESPACE}" rollout status deployment/cluster-autoscaler --timeout=180s
 
   # App workloads (on agent node — may take longer if spot is being provisioned)
   kubectl -n "${NAMESPACE}" rollout status deployment/pixtools-api --timeout=300s

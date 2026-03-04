@@ -72,6 +72,7 @@ jobs:
           WORKER_IMAGE: ${{ steps.image.outputs.worker_image }}
           ALLOWED_INGRESS_CIDRS: ${{ secrets.ALLOWED_INGRESS_CIDRS }}
           ALB_SECURITY_GROUP_ID: ${{ env.ALB_SECURITY_GROUP_ID }}
+          K3S_CLUSTER_NAME: pixtools-${{ env.ENVIRONMENT }}-k3s
         run: |
           chmod +x scripts/deploy/render-manifests.sh
           scripts/deploy/render-manifests.sh build/manifests

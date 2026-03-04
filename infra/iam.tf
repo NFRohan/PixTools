@@ -91,8 +91,38 @@ data "aws_iam_policy_document" "k3s_node_inline" {
       "ec2:DescribeAvailabilityZones",
       "ec2:DescribeTags",
       "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:GetInstanceTypesFromInstanceRequirements",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid    = "ClusterAutoscalerScaleWorkloadAsg"
+    effect = "Allow"
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/${local.name_prefix}-k3s"
+      values   = ["owned"]
+    }
   }
 
   # Demo-level permissions for AWS Load Balancer Controller on self-managed K3s.

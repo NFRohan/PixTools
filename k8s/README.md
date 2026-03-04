@@ -8,6 +8,7 @@ Manifests under this directory are rendered by `scripts/deploy/render-manifests.
 - `__WORKER_IMAGE__`
 - `__ALLOWED_INGRESS_CIDRS__`
 - `__ALB_SECURITY_GROUP_ID__`
+- `__K3S_CLUSTER_NAME__`
 
 These are replaced in CI/CD before sync to S3.
 
@@ -22,6 +23,10 @@ These are replaced in CI/CD before sync to S3.
 - Queue-driven worker autoscaling is managed through KEDA:
   - KEDA itself is installed by `scripts/deploy/reconcile-cluster.sh`
   - in-repo scaler specs live under `k8s/autoscaling/`
+- Node autoscaling is managed by Cluster Autoscaler:
+  - autodiscovers only the workload ASG via AWS tags
+  - runs on the fixed infra node
+  - never manages the infra/server ASG
 - CD uploads rendered manifests + reconcile script to S3, then executes reconcile over SSM.
 
 ## Monitoring Components

@@ -23,6 +23,11 @@ output "k3s_agent_asg_name" {
   value       = aws_autoscaling_group.k3s_agent.name
 }
 
+output "k3s_cluster_name" {
+  description = "Logical K3s cluster name used for autoscaler autodiscovery tags."
+  value       = "${local.name_prefix}-k3s"
+}
+
 output "k3s_node_security_group_id" {
   description = "K3s node security group ID."
   value       = aws_security_group.k3s_node.id

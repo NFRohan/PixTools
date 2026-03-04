@@ -221,6 +221,18 @@ resource "aws_autoscaling_group" "k3s_agent" {
     propagate_at_launch = true
   }
 
+  tag {
+    key                 = "k8s.io/cluster-autoscaler/enabled"
+    value               = "true"
+    propagate_at_launch = false
+  }
+
+  tag {
+    key                 = "k8s.io/cluster-autoscaler/${local.name_prefix}-k3s"
+    value               = "owned"
+    propagate_at_launch = false
+  }
+
   depends_on = [
     aws_autoscaling_group.k3s_server,
   ]
