@@ -19,6 +19,9 @@ These are replaced in CI/CD before sync to S3.
 - Workloads use explicit node selectors:
   - app pods: `pixtools-workload-app=true`
   - infra pods: `pixtools-workload-infra=true`
+- Queue-driven worker autoscaling is managed through KEDA:
+  - KEDA itself is installed by `scripts/deploy/reconcile-cluster.sh`
+  - in-repo scaler specs live under `k8s/autoscaling/`
 - CD uploads rendered manifests + reconcile script to S3, then executes reconcile over SSM.
 
 ## Monitoring Components

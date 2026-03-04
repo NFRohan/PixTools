@@ -1,0 +1,36 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: pixtools-worker-standard
+  namespace: pixtools
+spec:
+  scaleTargetRef:
+    name: pixtools-worker-standard
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: auto
+        queueName: default_queue
+        mode: QueueLength
+        value: "8"
+        activationValue: "3"
+        hostFromEnv: RABBITMQ_URL

@@ -49,6 +49,26 @@ normalize_url() {
   printf '%s' "${value}"
 }
 
+install_keda() {
+  local values_file="${MANIFEST_DIR}/autoscaling/keda-values.yaml"
+
+  if [[ ! -f "${values_file}" ]]; then
+    log "KEDA values file not found; skipping KEDA install"
+    return
+  fi
+
+  log "Installing or upgrading KEDA"
+  helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
+  helm repo update kedacore >/dev/null
+  helm upgrade --install keda kedacore/keda \
+    --namespace keda \
+    --create-namespace \
+    --version 2.19.0 \
+    -f "${values_file}" \
+    --wait \
+    --timeout 180s >/dev/null
+}
+
 instance_state_for_node() {
   local provider_id="${1:-}"
   local instance_id=""
@@ -91,6 +111,13 @@ cleanup_stale_terminating_pods() {
     log "  force deleting pod ${pod_name}"
     kubectl -n "${NAMESPACE}" delete pod "${pod_name}" --force --grace-period=0 >/dev/null || true
   done < <(kubectl -n "${NAMESPACE}" get pods -o json | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name')
+}
+
+cleanup_deprecated_autoscalers() {
+  if [[ -f "${MANIFEST_DIR}/autoscaling/worker-standard-scaledobject.yaml" ]]; then
+    log "Removing deprecated worker-standard HPA in favor of KEDA"
+    kubectl -n "${NAMESPACE}" delete hpa pixtools-worker-standard --ignore-not-found=true >/dev/null || true
+  fi
 }
 
 # ============================================================
@@ -287,7 +314,7 @@ apply_manifests() {
     "${MANIFEST_DIR}/api/deployment.yaml"
     "${MANIFEST_DIR}/api/hpa.yaml"
     "${MANIFEST_DIR}/workers/worker-standard.yaml"
-    "${MANIFEST_DIR}/workers/worker-standard-hpa.yaml"
+    "${MANIFEST_DIR}/autoscaling/worker-standard-scaledobject.yaml"
     "${MANIFEST_DIR}/workers/worker-ml.yaml"
     "${MANIFEST_DIR}/workers/beat.yaml"
     "${MANIFEST_DIR}/ingress/ingress.yaml"
@@ -333,6 +360,8 @@ main() {
   cleanup_stale_nodes
   cleanup_stale_terminating_pods
   label_nodes_by_role
+  install_keda
+  cleanup_deprecated_autoscalers
   apply_manifests
   wait_for_rollouts
   log "Cluster reconciliation complete"
