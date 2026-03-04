@@ -108,6 +108,34 @@ data "aws_iam_policy_document" "k3s_node_inline" {
     resources = ["*"]
   }
 
+  # The managed AmazonEBSCSIDriverPolicy relies on request/resource tag
+  # conditions that are brittle in this self-managed K3s setup. Keep the
+  # managed policy attached, but also grant the node role the underlying EBS
+  # actions explicitly so RabbitMQ gp3 provisioning is reliable.
+  statement {
+    sid    = "EbsCsiDriverExplicitAccess"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateVolume",
+      "ec2:DeleteVolume",
+      "ec2:AttachVolume",
+      "ec2:DetachVolume",
+      "ec2:ModifyVolume",
+      "ec2:CreateSnapshot",
+      "ec2:DeleteSnapshot",
+      "ec2:CreateTags",
+      "ec2:DeleteTags",
+      "ec2:DescribeAvailabilityZones",
+      "ec2:DescribeInstances",
+      "ec2:DescribeSnapshots",
+      "ec2:DescribeTags",
+      "ec2:DescribeVolumes",
+      "ec2:DescribeVolumesModifications",
+      "ec2:DescribeVolumeStatus",
+    ]
+    resources = ["*"]
+  }
+
   statement {
     sid    = "ClusterAutoscalerScaleWorkloadAsg"
     effect = "Allow"
