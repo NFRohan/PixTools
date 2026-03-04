@@ -90,6 +90,35 @@ kubectl_apply_with_retry() {
   return 1
 }
 
+recover_keda_release_if_stuck() {
+  local helm_status=""
+  local stable_revision=""
+
+  helm_status="$(
+    helm status keda --namespace keda -o json 2>/dev/null | jq -r '.info.status // "unknown"' 2>/dev/null || echo "unknown"
+  )"
+
+  case "${helm_status}" in
+    pending-install|pending-upgrade|pending-rollback)
+      stable_revision="$(
+        helm history keda --namespace keda -o json 2>/dev/null |
+          jq -r '[.[] | select(.status == "deployed" or .status == "superseded")] | last | .revision // empty' 2>/dev/null || true
+      )"
+
+      if [[ -z "${stable_revision}" ]]; then
+        log "KEDA Helm release is stuck (${helm_status}) but no stable revision was found for rollback"
+        return 1
+      fi
+
+      log "Recovering stuck KEDA Helm release (${helm_status}) via rollback to revision ${stable_revision}"
+      helm rollback keda "${stable_revision}" \
+        --namespace keda \
+        --wait \
+        --timeout 180s >/dev/null
+      ;;
+  esac
+}
+
 install_keda() {
   local values_file="${MANIFEST_DIR}/autoscaling/keda-values.yaml"
   local max_attempts=12
@@ -97,6 +126,7 @@ install_keda() {
   local helm_output=""
   local helm_status="unknown"
   local rc=0
+  local recovered=false
 
   if [[ ! -f "${values_file}" ]]; then
     log "KEDA values file not found; skipping KEDA install"
@@ -106,6 +136,7 @@ install_keda() {
   log "Installing or upgrading KEDA"
   helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
   helm repo update kedacore >/dev/null
+  recover_keda_release_if_stuck || true
 
   while (( attempt <= max_attempts )); do
     set +e
@@ -129,6 +160,12 @@ install_keda() {
       helm_status="$(
         helm status keda --namespace keda -o json 2>/dev/null | jq -r '.info.status // "unknown"' 2>/dev/null || echo "unknown"
       )"
+
+      if [[ "${recovered}" == false && "${helm_status}" == pending-* ]]; then
+        recover_keda_release_if_stuck || true
+        recovered=true
+      fi
+
       log "KEDA Helm release busy (status=${helm_status}); retrying ${attempt}/${max_attempts} in 15s"
       sleep 15
       attempt=$((attempt + 1))
