@@ -97,6 +97,16 @@ flowchart TD
 | Infrastructure | Terraform | VPC, EC2, IAM, RDS, S3, SSM, ECR, security groups |
 | Delivery | GitHub Actions + OIDC | CI and CD workflows authenticate to AWS with short-lived credentials |
 
+## Capacity Classes
+
+PixTools now treats cluster capacity as three scheduling classes:
+
+- infra-critical: `rabbitmq`, `redis`, `pixtools-beat`, `celery-exporter`, KEDA, and Cluster Autoscaler stay pinned to `pixtools-workload-infra=true`
+- app-standard: `pixtools-api` and `pixtools-worker-standard` stay pinned to `pixtools-workload-app=true` and prefer spreading across app nodes
+- app-ml: `pixtools-worker-ml` also stays on app nodes, but with a lower priority class than standard app traffic and a preference to avoid standard workers when spare app capacity exists
+
+ML does not have its own dedicated node class yet. That is an explicit decision, not a missing feature: the current system keeps ML on the shared app pool until observed contention or cost pressure justifies a separate ASG.
+
 ## AWS Deployment Shape
 
 The active cloud design is a two-tier K3s deployment in `us-east-1`:

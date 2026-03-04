@@ -29,6 +29,25 @@ These are replaced in CI/CD before sync to S3.
   - never manages the infra/server ASG
 - CD uploads rendered manifests + reconcile script to S3, then executes reconcile over SSM.
 
+## Capacity Classes
+
+- Infra class:
+  - node label: `pixtools-workload-infra=true`
+  - priority class: `pixtools-infra-critical`
+  - workloads: `rabbitmq`, `redis`, `pixtools-beat`, `celery-exporter`, Cluster Autoscaler, KEDA control plane
+- Standard app class:
+  - node label: `pixtools-workload-app=true`
+  - priority class: `pixtools-app-standard`
+  - workloads: `pixtools-api`, `pixtools-worker-standard`
+  - standard workers prefer to spread across app nodes and avoid co-locating with ML workers when another app node is available
+- ML app class:
+  - node label: `pixtools-workload-app=true`
+  - priority class: `pixtools-app-ml`
+  - workloads: `pixtools-worker-ml`
+  - ML remains on the general app pool for now; a dedicated ML node class is deferred until real contention or cost pressure justifies the extra ASG and scheduling complexity
+
+This means infra workloads never drift onto spot-backed app nodes, while app workloads still share the elastic pool in a controlled way.
+
 ## Monitoring Components
 
 `k8s/monitoring/` deploys a lightweight Grafana Cloud collector path:

@@ -23,6 +23,28 @@ spec:
       priorityClassName: pixtools-app-standard
       nodeSelector:
         pixtools-workload-app: "true"
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: pixtools-worker-standard
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: pixtools-worker-standard
+            - weight: 40
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: pixtools-worker-ml
       imagePullSecrets:
         - name: ecr-pull
       containers:
