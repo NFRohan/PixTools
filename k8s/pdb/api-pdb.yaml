@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pixtools-api
+  namespace: pixtools
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: pixtools-api

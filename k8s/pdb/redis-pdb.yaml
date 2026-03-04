@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis
+  namespace: pixtools
+spec:
+  # Intentionally non-strict for the current single-replica infra topology.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: redis

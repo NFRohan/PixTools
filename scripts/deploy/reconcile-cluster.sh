@@ -224,7 +224,11 @@ apply_manifests() {
 
   local ordered_files=(
     "${MANIFEST_DIR}/namespace.yaml"
+    "${MANIFEST_DIR}/priorityclasses.yaml"
     "${MANIFEST_DIR}/config/configmap.yaml"
+    "${MANIFEST_DIR}/pdb/api-pdb.yaml"
+    "${MANIFEST_DIR}/pdb/rabbitmq-pdb.yaml"
+    "${MANIFEST_DIR}/pdb/redis-pdb.yaml"
     "${MANIFEST_DIR}/redis/service.yaml"
     "${MANIFEST_DIR}/redis/deployment.yaml"
     "${MANIFEST_DIR}/rabbitmq/service.yaml"

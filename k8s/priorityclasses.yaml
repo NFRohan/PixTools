@@ -1,0 +1,23 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pixtools-infra-critical
+value: 100000
+globalDefault: false
+description: "Critical infra workloads that must win scheduling over app workloads."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pixtools-app-standard
+value: 50000
+globalDefault: false
+description: "Standard API and worker workloads."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pixtools-app-ml
+value: 40000
+globalDefault: false
+description: "ML workloads kept below core infra and standard app traffic."

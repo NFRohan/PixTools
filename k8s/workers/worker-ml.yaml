@@ -17,6 +17,7 @@ spec:
       labels:
         app: pixtools-worker-ml
     spec:
+      priorityClassName: pixtools-app-ml
       nodeSelector:
         pixtools-workload-app: "true"
       imagePullSecrets:

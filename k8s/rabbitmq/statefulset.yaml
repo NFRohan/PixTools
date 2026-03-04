@@ -16,6 +16,7 @@ spec:
       labels:
         app: rabbitmq
     spec:
+      priorityClassName: pixtools-infra-critical
       nodeSelector:
         pixtools-workload-infra: "true"
       containers:

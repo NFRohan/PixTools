@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rabbitmq
+  namespace: pixtools
+spec:
+  # Intentionally non-strict: a single-replica RabbitMQ with minAvailable=1 or
+  # maxUnavailable=0 would make the infra node effectively undrainable and block
+  # maintenance or future Cluster Autoscaler actions if infra capacity were ever managed.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
