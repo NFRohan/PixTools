@@ -92,6 +92,11 @@ kubectl_apply_with_retry() {
 
 install_keda() {
   local values_file="${MANIFEST_DIR}/autoscaling/keda-values.yaml"
+  local max_attempts=12
+  local attempt=1
+  local helm_output=""
+  local helm_status="unknown"
+  local rc=0
 
   if [[ ! -f "${values_file}" ]]; then
     log "KEDA values file not found; skipping KEDA install"
@@ -101,13 +106,41 @@ install_keda() {
   log "Installing or upgrading KEDA"
   helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
   helm repo update kedacore >/dev/null
-  helm upgrade --install keda kedacore/keda \
-    --namespace keda \
-    --create-namespace \
-    --version 2.19.0 \
-    -f "${values_file}" \
-    --wait \
-    --timeout 180s >/dev/null
+
+  while (( attempt <= max_attempts )); do
+    set +e
+    helm_output="$(
+      helm upgrade --install keda kedacore/keda \
+        --namespace keda \
+        --create-namespace \
+        --version 2.19.0 \
+        -f "${values_file}" \
+        --wait \
+        --timeout 180s 2>&1
+    )"
+    rc=$?
+    set -e
+
+    if (( rc == 0 )); then
+      return 0
+    fi
+
+    if grep -q "another operation (install/upgrade/rollback) is in progress" <<<"${helm_output}"; then
+      helm_status="$(
+        helm status keda --namespace keda -o json 2>/dev/null | jq -r '.info.status // "unknown"' 2>/dev/null || echo "unknown"
+      )"
+      log "KEDA Helm release busy (status=${helm_status}); retrying ${attempt}/${max_attempts} in 15s"
+      sleep 15
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    printf '%s\n' "${helm_output}" >&2
+    return "${rc}"
+  done
+
+  printf '%s\n' "${helm_output}" >&2
+  return 1
 }
 
 instance_state_for_node() {
