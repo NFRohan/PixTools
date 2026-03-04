@@ -49,6 +49,47 @@ normalize_url() {
   printf '%s' "${value}"
 }
 
+wait_for_apiserver() {
+  local timeout_seconds="${1:-180}"
+  local elapsed=0
+  local interval=5
+
+  while (( elapsed < timeout_seconds )); do
+    if kubectl get --raw='/readyz' >/dev/null 2>&1; then
+      return 0
+    fi
+
+    sleep "${interval}"
+    elapsed=$((elapsed + interval))
+  done
+
+  log "K3s API server did not become ready within ${timeout_seconds}s"
+  return 1
+}
+
+kubectl_apply_with_retry() {
+  local file="$1"
+  local max_attempts=6
+  local attempt
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if kubectl apply --validate=false -f "${file}"; then
+      return 0
+    fi
+
+    if (( attempt == max_attempts )); then
+      break
+    fi
+
+    log "kubectl apply failed for ${file}; waiting for API server before retry ${attempt}/${max_attempts}"
+    wait_for_apiserver 180
+    sleep 5
+  done
+
+  log "kubectl apply failed permanently for ${file}"
+  return 1
+}
+
 install_keda() {
   local values_file="${MANIFEST_DIR}/autoscaling/keda-values.yaml"
 
@@ -323,7 +364,7 @@ apply_manifests() {
 
   for file in "${ordered_files[@]}"; do
     if [[ -f "${file}" ]]; then
-      kubectl apply -f "${file}"
+      kubectl_apply_with_retry "${file}"
     fi
   done
 }
@@ -357,12 +398,14 @@ wait_for_rollouts() {
 main() {
   log "Starting cluster reconciliation"
   sync_manifests
+  wait_for_apiserver 180
   refresh_ecr_pull_secret
   sync_runtime_config
   cleanup_stale_nodes
   cleanup_stale_terminating_pods
   label_nodes_by_role
   install_keda
+  wait_for_apiserver 180
   cleanup_deprecated_autoscalers
   apply_manifests
   wait_for_rollouts
