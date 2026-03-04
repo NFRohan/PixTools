@@ -67,3 +67,16 @@ This means infra workloads never drift onto spot-backed app nodes, while app wor
 - Kubernetes log discovery and export to Grafana Cloud Loki
 - Prometheus scrape/remote-write to Grafana Cloud Metrics
 - OTLP trace export to Grafana Cloud Tempo
+
+## Scaling Safety Guardrails
+
+Sprint 4 guardrails are documented in:
+
+- `docs/scaling_guardrails.md` for panel queries, alert conditions, and benchmark gates
+- `docs/runbooks/` for incident handling playbooks
+
+Operational notes:
+
+- `pixtools-api` HPA and KEDA worker scaling include stabilization behavior to reduce flapping.
+- `pixtools-api` and `pixtools-worker-standard` use rolling strategies (`maxUnavailable: 0`) so autoscaling and rollouts do not force avoidable downtime.
+- `pixtools-beat` remains `Recreate` by design to avoid duplicate periodic task scheduling.

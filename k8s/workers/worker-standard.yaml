@@ -7,6 +7,8 @@ metadata:
     app: pixtools-worker-standard
 spec:
   replicas: 1
+  minReadySeconds: 10
+  revisionHistoryLimit: 5
   strategy:
     type: RollingUpdate
     rollingUpdate:

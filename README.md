@@ -474,6 +474,14 @@ Helper scripts:
 - `bench/collect-grafana-metrics.ps1`
 - `bench/templates/benchmark-report-template.md`
 
+Current benchmark pass/fail gates:
+
+- queue drain p95 after load stop: `<= 180s`
+- failed job ratio: `<= 1.0%`
+- in-region API p95: `<= 700ms`
+- standard worker saturation at max replicas: `<= 10m` continuous
+- no sustained `Pending` pods from CPU/memory pressure (`>2m`)
+
 This exists so performance claims can be tied to repeatable scripts and captured metrics, not vague anecdotes.
 
 ## Reference Docs
@@ -484,6 +492,8 @@ These files are the detailed source-of-truth documents for the current system:
 - `go_api_parity_patchlist.md` - migration parity checklist from the Python API to the Go API
 - `predeploy_blockers.md` - deploy review notes and intentional design debt
 - `bench/README.md` - benchmark execution notes
+- `docs/scaling_guardrails.md` - dashboard panel queries, alert conditions, and benchmark gates
+- `docs/runbooks/` - incident runbooks for backlog, scale-out failure, OOM recurrence, and spot interruption
 - `infra/README.md` - Terraform-specific notes
 
 ## Repository Layout
@@ -509,6 +519,7 @@ go-api/
 
 alembic/           Database schema migrations
 bench/             k6 scenarios and benchmark collection helpers
+docs/              scaling guardrails and runbooks
 infra/             Terraform IaC
 k8s/               Kubernetes manifests
 scripts/deploy/    Deployment and reconciliation helpers

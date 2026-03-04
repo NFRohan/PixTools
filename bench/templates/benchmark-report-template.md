@@ -15,12 +15,26 @@
 
 ## System Snapshot
 
-- **Infra node**: t3.small on-demand (K3s server, RabbitMQ, Redis, Beat)
-- **Workload node(s)**: m7i-flex.large spot ×___  (K3s agents)
+- **Infra node**: m7i-flex.large on-demand (K3s server, RabbitMQ, Redis, Beat)
+- **Workload node(s)**: m7i-flex.large spot x___ (K3s agents)
 - API replicas (HPA):
 - Standard worker replicas + concurrency:
 - ML worker replicas + pool:
 - RabbitMQ queue depths before run:
+
+## Pass/Fail Gates
+
+- Queue drain time after load stop (P95 target): `<= 180s`
+- Failed job ratio (`FAILED + COMPLETED_WEBHOOK_FAILED` / total terminal jobs): `<= 1.0%`
+- API latency p95 target (in-region): `<= 700ms`
+- Worker saturation (`pixtools-worker-standard` at max replicas): `<= 10m` continuous
+- Pending pods due to `Insufficient cpu|memory`: `0` sustained > `2m`
+
+Gate result summary:
+
+- PASS / FAIL:
+- Failed gates:
+- Mitigation required before next benchmark? `yes/no`
 
 ## Key Results
 

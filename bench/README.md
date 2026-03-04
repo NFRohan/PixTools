@@ -36,6 +36,19 @@ These are emitted by the app/workers and can be queried in Grafana:
 - `pixtools_webhook_circuit_transition_total` (Counter)
 - `pixtools_webhook_delivery_total` (Counter)
 
+## Sprint 4 Benchmark Gates
+
+Use these as pass/fail gates before claiming benchmark readiness:
+
+- Queue drain time after load stop (P95): `<= 180s`
+- Failed job ratio (`FAILED + COMPLETED_WEBHOOK_FAILED` / terminal jobs): `<= 1.0%`
+- API latency p95 (in-region run): `<= 700ms`
+- Standard worker saturation at max replicas: `<= 10m` continuous
+- Pods Pending due to `Insufficient cpu|memory`: `0` sustained beyond `2m`
+
+Use `bench/templates/benchmark-report-template.md` and mark each gate PASS/FAIL.
+If any gate fails, run the relevant incident runbook under `docs/runbooks/` before next benchmark pass.
+
 ## Load Scenarios
 
 ## Quick Scaling Smoke Test
@@ -215,3 +228,6 @@ For each run, archive:
   - timestamp window
   - 5 key metrics
   - pass/fail observations
+
+For panel and alert query definitions used by Sprint 4:
+- `docs/scaling_guardrails.md`
