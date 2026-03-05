@@ -4,26 +4,33 @@ This plan upgrades PixTools from a manually tuned demo deployment into a cluster
 
 It is written against the current repository and deployment model as of March 2026.
 
+Status note (2026-03-05):
+
+- this file started as a forward plan; multiple phases are now implemented
+- use this document as architecture intent + rationale
+- use `professional_scaling_sprint_plan.md`, `engineering_story.md`, and `README.md` for implementation status and latest evidence
+
 ## 1. Current State
 
 What exists today:
 
 - Go API pod autoscaling via `k8s/api/hpa.yaml`
-- standard worker pod autoscaling via `k8s/workers/worker-standard-hpa.yaml`
+- standard worker queue-driven autoscaling via KEDA `ScaledObject` (`k8s/autoscaling/worker-standard-scaledobject.yaml`)
 - fixed single-replica ML worker
 - EC2 Auto Scaling Group capacity range for workload nodes in `infra/compute.tf`
 - workload ASG sizing in `infra/dev.tfvars`
+- Cluster Autoscaler deployment and workload-ASG autodiscovery tags
+- capacity classes (infra / app-standard / app-ml) with PriorityClasses and placement policy
 - K3s on EC2, not EKS
 - RabbitMQ as the async control point
 
 What is still missing for true scaling:
 
-- queue-driven autoscaling for Celery workers
-- automatic node provisioning when pods become unschedulable
-- capacity-class separation between infra, standard work, and ML work
-- disruption controls strong enough for rolling deploys and scale-down events
-- scaling SLOs and benchmark gates
-- autoscaling driven by business load instead of CPU-only heuristics
+- validated and tunable node scale-down behavior over long idle windows
+- higher autoscaling ceilings and tuned policies under burst conditions
+- stronger overload control strategy (backpressure/load-shedding) before `500`/timeout failure cascades
+- ML-specific scaling policy decision backed by denoise-heavy benchmark evidence
+- promotion gates tied to repeated in-region production-suite runs
 
 ## 2. Target End State
 

@@ -33,11 +33,15 @@ terraform apply -var-file=dev.tfvars
 
 ## Notes
 
-- Compute is spot-only and pinned to `m7i-flex.large` by default.
+- Compute is split by role:
+  - infra/server ASG is fixed on-demand (`min=max=desired=1`)
+  - workload/agent ASG is spot-backed and autoscaled
+- Default instance class is `m7i-flex.large` for both infra and workload templates.
 - RDS is single-AZ `db.t4g.micro`.
 - K3s uses external datastore in RDS (`k3s_state` DB).
 - Manifests are pulled from S3 prefix `manifests/dev`.
 - Bootstrap and CD run `scripts/deploy/reconcile-cluster.sh`, which pulls runtime secrets from SSM and converges workloads.
+- Workload ASG is tagged for Cluster Autoscaler auto-discovery.
 - Monitoring creates:
   - SNS topic for alerts
   - ALB 5XX CloudWatch alarm (auto-discovered ALB by Kubernetes tags)

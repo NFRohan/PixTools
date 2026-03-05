@@ -1,6 +1,6 @@
 # Scaling Incident Runbooks
 
-Use these runbooks when Sprint 4 guardrails fail:
+Use these runbooks when scaling guardrails fail:
 
 - `queue-backlog-emergency.md`
 - `node-scaleout-failure.md`

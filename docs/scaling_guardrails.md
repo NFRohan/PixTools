@@ -1,12 +1,13 @@
 # Scaling Guardrails
 
-This document defines the Sprint 4 safety rails for autoscaling behavior, alerting signals, and benchmark gate checks.
+This document defines active scaling safety rails for autoscaling behavior, alerting signals, and benchmark gate checks.
 
 ## Scope
 
 - API HPA stability
 - KEDA-backed worker scaling stability
 - cluster capacity saturation visibility
+- production-suite error-shape visibility (`500` and transport-level failures)
 - benchmark pass/fail gates
 
 ## Dashboard Panels
@@ -69,6 +70,14 @@ histogram_quantile(
 )
 ```
 
+## 7. API Error Shape
+
+```promql
+sum(rate(pixtools_api_requests_total{status=~"5.."}[5m]))
+```
+
+Supplement this with k6 status-code histograms for transport-level `0` failures (timeouts/connection-level errors), because those do not appear as HTTP 5xx server responses.
+
 ## Alert Conditions
 
 ## A1: Worker Saturation Too Long
@@ -105,6 +114,12 @@ Trigger when:
 Trigger when:
 - in-region API p95 exceeds `700ms` for `>=5m` during baseline load
 
+## A6: Overload Error Regression
+
+Trigger when:
+- 5xx rate rises above expected baseline for `>=5m`
+- or transport-level failures appear in in-region benchmark output
+
 ## Benchmark Gates (Pass/Fail)
 
 A benchmark run passes only if all gates pass:
@@ -114,6 +129,9 @@ A benchmark run passes only if all gates pass:
 3. API p95 latency for in-region run: `<= 700ms`
 4. Worker saturation at max replicas: `<= 10m` continuous
 5. Pending pods from CPU/memory pressure: none sustained beyond `2m`
+6. Overload error shape remains bounded:
+   - no sustained transport-level failure bursts
+   - 5xx rate remains within benchmark acceptance envelope
 
 If any gate fails:
 - mark the run FAIL

@@ -54,9 +54,9 @@ This means infra workloads never drift onto spot-backed app nodes, while app wor
 ## Storage
 
 - `rabbitmq` should use the dedicated `gp3` StorageClass backed by the AWS EBS CSI driver.
-- Existing `local-path` RabbitMQ claims are not migrated automatically by CD because deleting them is destructive.
-- The one-time migration should be done during a controlled maintenance window by recreating the old `local-path` PVC/PV and letting the StatefulSet rebind on `gp3`.
-- The repo includes a one-shot helper for that maintenance window: `scripts/deploy/migrate-rabbitmq-to-gp3.sh`.
+- Existing RabbitMQ PVCs are not migrated automatically by CD because StatefulSet `volumeClaimTemplates` changes are immutable and destructive migration requires maintenance handling.
+- Reconcile explicitly skips RabbitMQ StatefulSet apply when it detects storage-class drift and logs a maintenance-required message.
+- Use `scripts/deploy/migrate-rabbitmq-to-gp3.sh` for the controlled one-time migration window.
 
 ## Monitoring Components
 

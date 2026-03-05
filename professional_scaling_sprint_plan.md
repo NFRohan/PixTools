@@ -2,6 +2,12 @@
 
 This converts `professional_scaling_plan.md` into an execution plan with discrete sprints.
 
+Status note (2026-03-05):
+
+- Sprint 0 through Sprint 4 have been largely implemented in the current repository and live environment.
+- Sprint 5 validation and production-suite benchmarking are now active and produce artifacts under `bench/results/`.
+- Keep this file as sprint intent and checklist history; use `engineering_story.md` for what actually happened in sequence.
+
 Scope:
 
 - production-grade scaling for the current PixTools architecture
